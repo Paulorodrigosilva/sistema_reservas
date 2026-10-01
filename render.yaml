@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: sistema-reservas
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/sessao
+    disk:
+      name: reservas-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_PATH
+        value: /var/data/database.sqlite
+      - key: MASTER_EMAIL
+        value: master@empresa.com
+      - key: MASTER_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
