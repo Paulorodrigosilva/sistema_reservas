@@ -2,6 +2,7 @@ node_modules/
 database.sqlite*
 .env*
 !.env.example
+.vercel/
 npm-debug.log*
 coverage/
 .DS_Store

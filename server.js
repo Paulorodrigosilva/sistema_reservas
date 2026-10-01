@@ -1,16 +1,23 @@
 const express = require('express');
-const session = require('express-session');
+const cookieSession = require('cookie-session');
 const bcrypt = require('bcryptjs');
-const sqlite3 = require('sqlite3').verbose();
+const { createClient } = require('@libsql/client');
 const path = require('path');
+const { pathToFileURL } = require('node:url');
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
+const sessionMaxAge = 8 * 60 * 60 * 1000;
 const databasePath = process.env.DATABASE_PATH || path.join(__dirname, 'database.sqlite');
-const db = new sqlite3.Database(databasePath);
+const useTurso = Boolean(process.env.TURSO_DATABASE_URL);
+if (process.env.NODE_ENV === 'production' && (!useTurso || !process.env.TURSO_AUTH_TOKEN)) {
+  throw new Error('Defina TURSO_DATABASE_URL e TURSO_AUTH_TOKEN para usar o banco em producao.');
+}
+const databaseUrl = process.env.TURSO_DATABASE_URL || pathToFileURL(databasePath).href;
+const db = createClient({ url: databaseUrl, authToken: process.env.TURSO_AUTH_TOKEN });
 
-if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
-  throw new Error('Defina SESSION_SECRET antes de iniciar em producao.');
+if (process.env.NODE_ENV === 'production' && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32)) {
+  throw new Error('Defina SESSION_SECRET com pelo menos 32 caracteres antes de iniciar em producao.');
 }
 if (process.env.NODE_ENV === 'production' && (!process.env.MASTER_PASSWORD || process.env.MASTER_PASSWORD.length < 12)) {
   throw new Error('Defina MASTER_PASSWORD com pelo menos 12 caracteres antes de iniciar em producao.');
@@ -18,30 +25,36 @@ if (process.env.NODE_ENV === 'production' && (!process.env.MASTER_PASSWORD || pr
 
 app.use(express.json({ limit: '32kb' }));
 if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'chave-local-de-desenvolvimento-altere-em-producao',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 8 * 60 * 60 * 1000
-  }
+app.use(cookieSession({
+  name: 'reserva_session',
+  keys: [process.env.SESSION_SECRET || 'chave-local-de-desenvolvimento-altere-em-producao'],
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: sessionMaxAge
 }));
+app.use((req, res, next) => {
+  const issuedAt = req.session?.issuedAt;
+  if (req.session && (!Number.isFinite(issuedAt) || issuedAt > Date.now() || Date.now() - issuedAt > sessionMaxAge)) {
+    req.session = null;
+  }
+  next();
+});
 
-const run = (sql, params = []) => new Promise((resolve, reject) => {
-  db.run(sql, params, function onRun(error) {
-    if (error) reject(error);
-    else resolve({ id: this.lastID, changes: this.changes });
-  });
-});
-const get = (sql, params = []) => new Promise((resolve, reject) => {
-  db.get(sql, params, (error, row) => error ? reject(error) : resolve(row));
-});
-const all = (sql, params = []) => new Promise((resolve, reject) => {
-  db.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows));
-});
+async function run(sql, params = []) {
+  const result = await db.execute({ sql, args: params });
+  return { id: Number(result.lastInsertRowid || 0), changes: Number(result.rowsAffected) };
+}
+
+async function get(sql, params = []) {
+  const result = await db.execute({ sql, args: params });
+  return result.rows[0];
+}
+
+async function all(sql, params = []) {
+  const result = await db.execute({ sql, args: params });
+  return result.rows;
+}
 
 async function initializeDatabase() {
   await run(`CREATE TABLE IF NOT EXISTS usuarios (
@@ -97,26 +110,35 @@ async function initializeDatabase() {
   const existingMaster = await get('SELECT id FROM usuarios WHERE email = ?', [masterEmail]);
   if (!existingMaster) {
     const masterPassword = process.env.MASTER_PASSWORD || '123';
-    await run('INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)', [
-      'Administrador Master', masterEmail, await bcrypt.hash(masterPassword, 10), 'master'
-    ]);
+    try {
+      await run('INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)', [
+        'Administrador Master', masterEmail, await bcrypt.hash(masterPassword, 10), 'master'
+      ]);
+    } catch (error) {
+      if (!isConstraintError(error)) throw error;
+    }
   }
 }
 
+const databaseReady = initializeDatabase();
+app.use((req, res, next) => {
+  databaseReady.then(() => next()).catch((error) => handleError(res, error));
+});
+
 function requireAuth(req, res, next) {
-  if (!req.session.user) return res.status(401).json({ mensagem: 'Entre na sua conta para continuar.' });
+  if (!req.session?.user) return res.status(401).json({ mensagem: 'Entre na sua conta para continuar.' });
   next();
 }
 
 function requireMaster(req, res, next) {
-  if (req.session.user?.tipo !== 'master') {
+  if (req.session?.user?.tipo !== 'master') {
     return res.status(403).json({ mensagem: 'Apenas o usuario master pode fazer isso.' });
   }
   next();
 }
 
 function requireReservationEditor(req, res, next) {
-  if (req.session.user?.tipo !== 'master' && req.session.user?.pode_editar !== 1) {
+  if (req.session?.user?.tipo !== 'master' && req.session?.user?.pode_editar !== 1) {
     return res.status(403).json({ mensagem: 'Sua conta nao tem permissao para editar reservas.' });
   }
   next();
@@ -160,6 +182,10 @@ function handleError(res, error) {
   res.status(500).json({ mensagem: 'Ocorreu um erro interno. Tente novamente.' });
 }
 
+function isConstraintError(error) {
+  return String(error.code || '').startsWith('SQLITE_CONSTRAINT');
+}
+
 app.post('/api/cadastro', async (req, res) => {
   const nome = String(req.body.nome || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
@@ -173,7 +199,7 @@ app.post('/api/cadastro', async (req, res) => {
     ]);
     res.status(201).json({ id: result.id, mensagem: 'Cadastro criado. Agora voce ja pode entrar.' });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT') return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
+    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
     handleError(res, error);
   }
 });
@@ -190,27 +216,27 @@ app.post('/api/login', async (req, res) => {
     if (!passwordIsHashed) {
       await run('UPDATE usuarios SET senha = ? WHERE id = ?', [await bcrypt.hash(senha, 10), user.id]);
     }
-    req.session.regenerate((error) => {
-      if (error) return handleError(res, error);
-      req.session.user = {
+    req.session = {
+      issuedAt: Date.now(),
+      user: {
         id: user.id,
         nome: user.nome,
         email: user.email,
         tipo: user.tipo,
         pode_editar: user.pode_editar || 0
-      };
-      req.session.save((saveError) => {
-        if (saveError) return handleError(res, saveError);
-        res.json({ usuario: req.session.user });
-      });
-    });
+      }
+    };
+    res.json({ usuario: req.session.user });
   } catch (error) {
     handleError(res, error);
   }
 });
 
-app.get('/api/sessao', (req, res) => res.json({ usuario: req.session.user || null }));
-app.post('/api/logout', (req, res) => req.session.destroy(() => res.json({ mensagem: 'Sessao encerrada.' })));
+app.get('/api/sessao', (req, res) => res.json({ usuario: req.session?.user || null }));
+app.post('/api/logout', (req, res) => {
+  req.session = null;
+  res.json({ mensagem: 'Sessao encerrada.' });
+});
 
 app.get('/api/usuarios', requireAuth, requireMaster, async (req, res) => {
   try {
@@ -232,7 +258,7 @@ app.post('/api/usuarios', requireAuth, requireMaster, async (req, res) => {
     ]);
     res.status(201).json({ id: result.id, mensagem: 'Usuario adicionado.' });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT') return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
+    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
     handleError(res, error);
   }
 });
@@ -406,9 +432,13 @@ app.use('/api', (req, res) => res.status(404).json({ mensagem: 'Rota da API nao 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-initializeDatabase().then(() => {
-  app.listen(port, () => console.log(`Sistema de reservas disponivel em http://localhost:${port}`));
-}).catch((error) => {
-  console.error('Falha ao inicializar o banco de dados:', error);
-  process.exit(1);
-});
+if (require.main === module) {
+  databaseReady.then(() => {
+    app.listen(port, () => console.log(`Sistema de reservas disponivel em http://localhost:${port}`));
+  }).catch((error) => {
+    console.error('Falha ao inicializar o banco de dados:', error);
+    process.exit(1);
+  });
+}
+
+module.exports = app;
