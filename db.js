@@ -218,7 +218,6 @@ async function initializeDatabase() {
     await run('CREATE INDEX IF NOT EXISTS idx_reservas_recurso ON reservas(recurso_id)');
     await run('CREATE INDEX IF NOT EXISTS idx_reservas_data ON reservas(data_inicio, data_fim)');
 
-    // Migrações legadas para colunas opcionais caso banco já exista
     const resourceColumns = await all('PRAGMA table_info(recursos)');
     if (!resourceColumns.some((col) => col.name === 'numero')) {
       await run("ALTER TABLE recursos ADD COLUMN numero TEXT NOT NULL DEFAULT ''");
@@ -240,10 +239,10 @@ async function initializeDatabase() {
     }
   }
 
-  const masterEmail = (process.env.MASTER_EMAIL || 'master@empresa.com').trim().toLowerCase();
+  const masterEmail = (process.env.MASTER_EMAIL || 'prodrigosilvacel@gmail.com').trim().toLowerCase();
   const existingMaster = await get('SELECT id FROM usuarios WHERE email = ?', [masterEmail]);
   if (!existingMaster) {
-    const masterPassword = (process.env.MASTER_PASSWORD || '123').trim();
+    const masterPassword = (process.env.MASTER_PASSWORD || 'w18187').trim();
     try {
       await run('INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)', [
         'Administrador Master', masterEmail, await bcrypt.hash(masterPassword, 10), 'master'
