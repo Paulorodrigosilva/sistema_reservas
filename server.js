@@ -55,7 +55,10 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.use((req, res, next) => {
-  ensureDatabaseReady().then(() => next()).catch((error) => handleError(res, error));
+  ensureDatabaseReady().then(() => next()).catch((error) => {
+    console.error('Erro ao preparar banco:', error);
+    handleError(res, error);
+  });
 });
 
 function requireAuth(req, res, next) {
@@ -111,10 +114,9 @@ async function updateFollowingOdometers(resourceId) {
 }
 
 function handleError(res, error) {
-  console.error(error);
+  console.error('Erro na API:', error);
   res.status(500).json({ mensagem: 'Ocorreu um erro interno. Tente novamente.' });
 }
-
 
 app.post('/api/cadastro', async (req, res) => {
   const nome = String(req.body.nome || '').trim();
@@ -135,17 +137,26 @@ app.post('/api/cadastro', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
-  const email = String(req.body.email || '').trim().toLowerCase();
-  const senha = String(req.body.senha || '');
   try {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const senha = String(req.body.senha || '');
+
+    if (!email || !senha) {
+      return res.status(400).json({ mensagem: 'Informe e-mail e senha.' });
+    }
+
     const user = await get('SELECT * FROM usuarios WHERE email = ?', [email]);
     if (!user) return res.status(401).json({ mensagem: 'E-mail ou senha incorretos.' });
-    const passwordIsHashed = user.senha.startsWith('$2');
-    const passwordMatches = passwordIsHashed ? await bcrypt.compare(senha, user.senha) : senha === user.senha;
+
+    const storedPassword = typeof user.senha === 'string' ? user.senha : '';
+    const passwordIsHashed = storedPassword.startsWith('$2');
+    const passwordMatches = passwordIsHashed ? await bcrypt.compare(senha, storedPassword) : senha === storedPassword;
     if (!passwordMatches) return res.status(401).json({ mensagem: 'E-mail ou senha incorretos.' });
+
     if (!passwordIsHashed) {
       await run('UPDATE usuarios SET senha = ? WHERE id = ?', [await bcrypt.hash(senha, 10), user.id]);
     }
+
     req.session = {
       issuedAt: Date.now(),
       user: {
@@ -153,11 +164,12 @@ app.post('/api/login', async (req, res) => {
         nome: user.nome,
         email: user.email,
         tipo: user.tipo,
-        pode_editar: user.pode_editar || 0
+        pode_editar: Number(user.pode_editar || 0)
       }
     };
     res.json({ usuario: req.session.user });
   } catch (error) {
+    console.error('Erro no login:', error);
     handleError(res, error);
   }
 });
@@ -294,7 +306,7 @@ app.post('/api/reservas', requireAuth, async (req, res) => {
     const result = await run(`INSERT INTO reservas
       (usuario_id, recurso_id, motorista, destino, motivo, km_inicio, km_final,
        combustivel_final, data_inicio, data_fim)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
       req.session.user.id, recursoId, motorista, destino, motivo, kmInicio, null,
       null, inicio, fim
     ]);

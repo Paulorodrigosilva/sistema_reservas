@@ -5,8 +5,8 @@ const initSqlJs = require('sql.js');
 const bcrypt = require('bcryptjs');
 
 const isVercel = Boolean(process.env.VERCEL);
-const rawDbUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
-const isPostgres = rawDbUrl.startsWith('postgres://') || rawDbUrl.startsWith('postgresql://');
+const rawDbUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || '').trim();
+const isPostgres = Boolean(rawDbUrl) && /^(postgres|postgresql):\/\//i.test(rawDbUrl);
 
 const DEFAULT_MASTER_EMAIL = (process.env.MASTER_EMAIL || 'prodrigosilvacel@gmail.com').trim().toLowerCase();
 const DEFAULT_MASTER_PASSWORD = (process.env.MASTER_PASSWORD || 'w18187').trim();
@@ -22,7 +22,7 @@ function getDatabaseType() {
 
 function getDatabaseTarget() {
   if (isPostgres) return 'PostgreSQL (Cloud / Supabase / Neon / Vercel Postgres)';
-  return isVercel ? 'SQLite (em memória na Vercel)' : 'SQLite (local database.sqlite)';
+  return isVercel ? 'SQLite (em memória na Vercel - configure DATABASE_URL ou NEON_DATABASE_URL)' : 'SQLite (local database.sqlite)';
 }
 
 function initPostgres() {
@@ -43,6 +43,9 @@ async function initSqlite() {
     if (isVercel) {
       sqliteDb = new SQL.Database();
       sqlitePath = null;
+      if (!isPostgres) {
+        console.warn('Nenhuma URL de banco PostgreSQL foi detectada. A app esta usando SQLite em memoria na Vercel, que nao persiste entre invocações. Configure DATABASE_URL ou NEON_DATABASE_URL no ambiente.');
+      }
     } else {
       const defaultPath = path.join(__dirname, 'database.sqlite');
       sqlitePath = (process.env.DATABASE_PATH || '').trim() || defaultPath;
