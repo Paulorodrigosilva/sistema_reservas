@@ -1,0 +1,5 @@
+{
+  "name": "Reserva | Espaços e frota",
+  "description": "Sistema interno para reservas de salas e veículos organizados em uma agenda só.",
+  "requestFramePermissions": []
+}

@@ -1,38 +1,36 @@
 const express = require('express');
 const cookieSession = require('cookie-session');
 const bcrypt = require('bcryptjs');
-const { createClient } = require('@libsql/client');
 const path = require('path');
-const { pathToFileURL } = require('node:url');
+const {
+  run,
+  get,
+  all,
+  ensureDatabaseReady,
+  isConstraintError,
+  getDatabaseType,
+  getDatabaseTarget
+} = require('./db');
 
 const app = express();
-const port = Number(process.env.PORT) || 3001;
+const port = process.env.VERCEL ? (Number(process.env.PORT) || 3000) : 3000;
 const sessionMaxAge = 8 * 60 * 60 * 1000;
-const databasePath = process.env.DATABASE_PATH || path.join(__dirname, 'database.sqlite');
-const useTurso = Boolean(process.env.TURSO_DATABASE_URL);
-if (process.env.NODE_ENV === 'production' && (!useTurso || !process.env.TURSO_AUTH_TOKEN)) {
-  throw new Error('Defina TURSO_DATABASE_URL e TURSO_AUTH_TOKEN para usar o banco em producao.');
-}
-const databaseUrl = process.env.TURSO_DATABASE_URL || pathToFileURL(databasePath).href;
-const db = createClient({ url: databaseUrl, authToken: process.env.TURSO_AUTH_TOKEN });
-
-if (process.env.NODE_ENV === 'production' && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32)) {
-  throw new Error('Defina SESSION_SECRET com pelo menos 32 caracteres antes de iniciar em producao.');
-}
-if (process.env.NODE_ENV === 'production' && (!process.env.MASTER_PASSWORD || process.env.MASTER_PASSWORD.length < 12)) {
-  throw new Error('Defina MASTER_PASSWORD com pelo menos 12 caracteres antes de iniciar em producao.');
-}
+const isVercel = Boolean(process.env.VERCEL);
+const sessionSecret = (process.env.SESSION_SECRET || '').trim() || 'chave-local-de-desenvolvimento-altere-em-producao';
 
 app.use(express.json({ limit: '32kb' }));
-if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
-app.use(cookieSession({
-  name: 'reserva_session',
-  keys: [process.env.SESSION_SECRET || 'chave-local-de-desenvolvimento-altere-em-producao'],
-  httpOnly: true,
-  sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',
-  maxAge: sessionMaxAge
-}));
+app.set('trust proxy', 1);
+app.use((req, res, next) => {
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  return cookieSession({
+    name: 'reserva_session',
+    keys: [sessionSecret],
+    httpOnly: true,
+    sameSite: isHttps ? 'none' : 'lax',
+    secure: isHttps,
+    maxAge: sessionMaxAge
+  })(req, res, next);
+});
 app.use((req, res, next) => {
   const issuedAt = req.session?.issuedAt;
   if (req.session && (!Number.isFinite(issuedAt) || issuedAt > Date.now() || Date.now() - issuedAt > sessionMaxAge)) {
@@ -41,88 +39,23 @@ app.use((req, res, next) => {
   next();
 });
 
-async function run(sql, params = []) {
-  const result = await db.execute({ sql, args: params });
-  return { id: Number(result.lastInsertRowid || 0), changes: Number(result.rowsAffected) };
-}
-
-async function get(sql, params = []) {
-  const result = await db.execute({ sql, args: params });
-  return result.rows[0];
-}
-
-async function all(sql, params = []) {
-  const result = await db.execute({ sql, args: params });
-  return result.rows;
-}
-
-async function initializeDatabase() {
-  await run(`CREATE TABLE IF NOT EXISTS usuarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    senha TEXT NOT NULL,
-    tipo TEXT NOT NULL DEFAULT 'usuario',
-    pode_editar INTEGER NOT NULL DEFAULT 0
-  )`);
-  await run(`CREATE TABLE IF NOT EXISTS recursos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT NOT NULL,
-    tipo TEXT NOT NULL,
-    numero TEXT NOT NULL DEFAULT ''
-  )`);
-  await run(`CREATE TABLE IF NOT EXISTS reservas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
-    recurso_id INTEGER NOT NULL REFERENCES recursos(id),
-    motorista TEXT NOT NULL DEFAULT '',
-    destino TEXT NOT NULL DEFAULT '',
-    motivo TEXT NOT NULL DEFAULT '',
-    km_inicio REAL,
-    km_final REAL,
-    combustivel_inicio INTEGER,
-    combustivel_final INTEGER,
-    data_inicio TEXT NOT NULL,
-    data_fim TEXT NOT NULL
-  )`);
-
-  const resourceColumns = await all('PRAGMA table_info(recursos)');
-  if (!resourceColumns.some((column) => column.name === 'numero')) {
-    await run("ALTER TABLE recursos ADD COLUMN numero TEXT NOT NULL DEFAULT ''");
+app.get('/api/health', async (req, res) => {
+  try {
+    await ensureDatabaseReady();
+    res.json({
+      ok: true,
+      ambiente: isVercel ? 'vercel' : 'node',
+      tipo_banco: getDatabaseType(),
+      origem_banco: getDatabaseTarget()
+    });
+  } catch (error) {
+    console.error('Falha no healthcheck do banco:', error);
+    res.status(500).json({ ok: false, mensagem: 'Falha na conexao com o banco de dados.' });
   }
-  const userColumns = await all('PRAGMA table_info(usuarios)');
-  if (!userColumns.some((column) => column.name === 'pode_editar')) {
-    await run('ALTER TABLE usuarios ADD COLUMN pode_editar INTEGER NOT NULL DEFAULT 0');
-  }
-  const reservationColumns = await all('PRAGMA table_info(reservas)');
-  const reservationMigrations = [
-    ['motivo', "ALTER TABLE reservas ADD COLUMN motivo TEXT NOT NULL DEFAULT ''"],
-    ['km_inicio', 'ALTER TABLE reservas ADD COLUMN km_inicio REAL'],
-    ['km_final', 'ALTER TABLE reservas ADD COLUMN km_final REAL'],
-    ['combustivel_inicio', 'ALTER TABLE reservas ADD COLUMN combustivel_inicio INTEGER'],
-    ['combustivel_final', 'ALTER TABLE reservas ADD COLUMN combustivel_final INTEGER']
-  ];
-  for (const [column, migration] of reservationMigrations) {
-    if (!reservationColumns.some((item) => item.name === column)) await run(migration);
-  }
+});
 
-  const masterEmail = (process.env.MASTER_EMAIL || 'master@empresa.com').trim().toLowerCase();
-  const existingMaster = await get('SELECT id FROM usuarios WHERE email = ?', [masterEmail]);
-  if (!existingMaster) {
-    const masterPassword = process.env.MASTER_PASSWORD || '123';
-    try {
-      await run('INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)', [
-        'Administrador Master', masterEmail, await bcrypt.hash(masterPassword, 10), 'master'
-      ]);
-    } catch (error) {
-      if (!isConstraintError(error)) throw error;
-    }
-  }
-}
-
-const databaseReady = initializeDatabase();
 app.use((req, res, next) => {
-  databaseReady.then(() => next()).catch((error) => handleError(res, error));
+  ensureDatabaseReady().then(() => next()).catch((error) => handleError(res, error));
 });
 
 function requireAuth(req, res, next) {
@@ -182,9 +115,6 @@ function handleError(res, error) {
   res.status(500).json({ mensagem: 'Ocorreu um erro interno. Tente novamente.' });
 }
 
-function isConstraintError(error) {
-  return String(error.code || '').startsWith('SQLITE_CONSTRAINT');
-}
 
 app.post('/api/cadastro', async (req, res) => {
   const nome = String(req.body.nome || '').trim();
@@ -433,8 +363,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 if (require.main === module) {
-  databaseReady.then(() => {
-    app.listen(port, () => console.log(`Sistema de reservas disponivel em http://localhost:${port}`));
+  ensureDatabaseReady().then(() => {
+    app.listen(port, '0.0.0.0', () => console.log(`Sistema de reservas disponivel em http://0.0.0.0:${port}`));
   }).catch((error) => {
     console.error('Falha ao inicializar o banco de dados:', error);
     process.exit(1);
