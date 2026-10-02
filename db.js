@@ -8,6 +8,9 @@ const isVercel = Boolean(process.env.VERCEL);
 const rawDbUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL || '').trim();
 const isPostgres = rawDbUrl.startsWith('postgres://') || rawDbUrl.startsWith('postgresql://');
 
+const DEFAULT_MASTER_EMAIL = (process.env.MASTER_EMAIL || 'prodrigosilvacel@gmail.com').trim().toLowerCase();
+const DEFAULT_MASTER_PASSWORD = (process.env.MASTER_PASSWORD || 'w18187').trim();
+
 let pgPool = null;
 let sqliteDb = null;
 let sqlitePath = null;
@@ -19,7 +22,7 @@ function getDatabaseType() {
 
 function getDatabaseTarget() {
   if (isPostgres) return 'PostgreSQL (Cloud / Supabase / Neon / Vercel Postgres)';
-  return isVercel ? 'SQLite (/tmp/database.sqlite)' : 'SQLite (local database.sqlite)';
+  return isVercel ? 'SQLite (em memória na Vercel)' : 'SQLite (local database.sqlite)';
 }
 
 function initPostgres() {
@@ -36,28 +39,32 @@ function initPostgres() {
 async function initSqlite() {
   if (!sqliteDb) {
     const SQL = await initSqlJs();
-    const defaultPath = isVercel
-      ? path.join('/tmp', 'database.sqlite')
-      : path.join(__dirname, 'database.sqlite');
-    sqlitePath = (process.env.DATABASE_PATH || '').trim() || defaultPath;
 
-    if (fs.existsSync(sqlitePath)) {
-      try {
-        const fileBuffer = fs.readFileSync(sqlitePath);
-        sqliteDb = new SQL.Database(fileBuffer);
-      } catch (err) {
-        console.warn('Erro ao ler banco existente, iniciando novo:', err.message);
+    if (isVercel) {
+      sqliteDb = new SQL.Database();
+      sqlitePath = null;
+    } else {
+      const defaultPath = path.join(__dirname, 'database.sqlite');
+      sqlitePath = (process.env.DATABASE_PATH || '').trim() || defaultPath;
+
+      if (fs.existsSync(sqlitePath)) {
+        try {
+          const fileBuffer = fs.readFileSync(sqlitePath);
+          sqliteDb = new SQL.Database(fileBuffer);
+        } catch (err) {
+          console.warn('Erro ao ler banco existente, iniciando novo:', err.message);
+          sqliteDb = new SQL.Database();
+        }
+      } else {
         sqliteDb = new SQL.Database();
       }
-    } else {
-      sqliteDb = new SQL.Database();
     }
   }
   return sqliteDb;
 }
 
 function persistSqlite() {
-  if (!sqliteDb || !sqlitePath) return;
+  if (!sqliteDb || !sqlitePath || isVercel) return;
   try {
     const data = sqliteDb.export();
     const dir = path.dirname(sqlitePath);
@@ -183,6 +190,7 @@ async function initializeDatabase() {
     await run('CREATE INDEX IF NOT EXISTS idx_reservas_data ON reservas(data_inicio, data_fim)');
   } else {
     await initSqlite();
+
     await run(`CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
@@ -218,37 +226,44 @@ async function initializeDatabase() {
     await run('CREATE INDEX IF NOT EXISTS idx_reservas_recurso ON reservas(recurso_id)');
     await run('CREATE INDEX IF NOT EXISTS idx_reservas_data ON reservas(data_inicio, data_fim)');
 
-    const resourceColumns = await all('PRAGMA table_info(recursos)');
-    if (!resourceColumns.some((col) => col.name === 'numero')) {
-      await run("ALTER TABLE recursos ADD COLUMN numero TEXT NOT NULL DEFAULT ''");
-    }
-    const userColumns = await all('PRAGMA table_info(usuarios)');
-    if (!userColumns.some((col) => col.name === 'pode_editar')) {
-      await run('ALTER TABLE usuarios ADD COLUMN pode_editar INTEGER NOT NULL DEFAULT 0');
-    }
-    const reservationColumns = await all('PRAGMA table_info(reservas)');
-    const reservationMigrations = [
-      ['motivo', "ALTER TABLE reservas ADD COLUMN motivo TEXT NOT NULL DEFAULT ''"],
-      ['km_inicio', 'ALTER TABLE reservas ADD COLUMN km_inicio REAL'],
-      ['km_final', 'ALTER TABLE reservas ADD COLUMN km_final REAL'],
-      ['combustivel_inicio', 'ALTER TABLE reservas ADD COLUMN combustivel_inicio INTEGER'],
-      ['combustivel_final', 'ALTER TABLE reservas ADD COLUMN combustivel_final INTEGER']
-    ];
-    for (const [column, migration] of reservationMigrations) {
-      if (!reservationColumns.some((item) => item.name === column)) await run(migration);
+    if (!isVercel) {
+      const resourceColumns = await all('PRAGMA table_info(recursos)');
+      if (!resourceColumns.some((col) => col.name === 'numero')) {
+        await run("ALTER TABLE recursos ADD COLUMN numero TEXT NOT NULL DEFAULT ''");
+      }
+      const userColumns = await all('PRAGMA table_info(usuarios)');
+      if (!userColumns.some((col) => col.name === 'pode_editar')) {
+        await run('ALTER TABLE usuarios ADD COLUMN pode_editar INTEGER NOT NULL DEFAULT 0');
+      }
+      const reservationColumns = await all('PRAGMA table_info(reservas)');
+      const reservationMigrations = [
+        ['motivo', "ALTER TABLE reservas ADD COLUMN motivo TEXT NOT NULL DEFAULT ''"],
+        ['km_inicio', 'ALTER TABLE reservas ADD COLUMN km_inicio REAL'],
+        ['km_final', 'ALTER TABLE reservas ADD COLUMN km_final REAL'],
+        ['combustivel_inicio', 'ALTER TABLE reservas ADD COLUMN combustivel_inicio INTEGER'],
+        ['combustivel_final', 'ALTER TABLE reservas ADD COLUMN combustivel_final INTEGER']
+      ];
+      for (const [column, migration] of reservationMigrations) {
+        if (!reservationColumns.some((item) => item.name === column)) await run(migration);
+      }
     }
   }
 
-  const masterEmail = (process.env.MASTER_EMAIL || 'prodrigosilvacel@gmail.com').trim().toLowerCase();
-  const existingMaster = await get('SELECT id FROM usuarios WHERE email = ?', [masterEmail]);
-  if (!existingMaster) {
-    const masterPassword = (process.env.MASTER_PASSWORD || 'w18187').trim();
-    try {
+  try {
+    const existingMaster = await get('SELECT id FROM usuarios WHERE email = ?', [DEFAULT_MASTER_EMAIL]);
+    if (!existingMaster) {
       await run('INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)', [
-        'Administrador Master', masterEmail, await bcrypt.hash(masterPassword, 10), 'master'
+        'Administrador Master',
+        DEFAULT_MASTER_EMAIL,
+        await bcrypt.hash(DEFAULT_MASTER_PASSWORD, 10),
+        'master'
       ]);
-    } catch (error) {
-      if (!isConstraintError(error)) throw error;
+      console.log(`Usuário master criado: ${DEFAULT_MASTER_EMAIL}`);
+    }
+  } catch (error) {
+    if (!isConstraintError(error)) {
+      console.error('Erro ao criar usuário master:', error);
+      throw error;
     }
   }
 }
