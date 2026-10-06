@@ -265,8 +265,27 @@ const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS
 app.get('/api/reservas', requireAuth, async (req, res) => {
   try {
     const canEdit = req.session.user.tipo === 'master' || req.session.user.pode_editar === 1;
-    const where = canEdit ? '' : ' WHERE r.usuario_id = ?';
-    const params = where ? [req.session.user.id] : [];
+    let conditions = [];
+    let params = [];
+
+    if (!canEdit) {
+      conditions.push('r.usuario_id = ?');
+      params.push(req.session.user.id);
+    }
+
+    // Se a query enviar uma data específica de filtro
+    const dataFiltro = String(req.query.data || '').trim();
+    if (dataFiltro) {
+      conditions.push('date(r.data_fim) >= ? AND date(r.data_inicio) <= ?');
+      params.push(dataFiltro, dataFiltro);
+    } else {
+      // Se não houver filtro de data informado, oculta as passadas (mostra de hoje em diante)
+      const hoje = new Date().toISOString().split('T')[0];
+      conditions.push('date(r.data_fim) >= ?');
+      params.push(hoje);
+    }
+
+    const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
     res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
   } catch (error) { handleError(res, error); }
 });
@@ -326,7 +345,7 @@ app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, 
   if (!recursoId || !inicio || !fim || new Date(inicio) >= new Date(fim)) {
     return res.status(400).json({ mensagem: 'Informe o recurso e um periodo valido, com fim depois do inicio.' });
   }
-    if (Number.isNaN(kmFinal) || (kmFinal !== null && kmFinal < 0) || !validFuelLevel(combustivelFinal) ||
+  if (Number.isNaN(kmFinal) || (kmFinal !== null && kmFinal < 0) || !validFuelLevel(combustivelFinal) ||
       ((kmFinal === null) !== (combustivelFinal === null))) {
     return res.status(400).json({ mensagem: 'Confira os valores de quilometragem e combustivel.' });
   }
@@ -375,7 +394,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 if (require.main === module) {
-  ensureDatabaseReady().then(() => {
+  ensureDatabaseReady().textn?.() || ensureDatabaseReady().then(() => {
     app.listen(port, '0.0.0.0', () => console.log(`Sistema de reservas disponivel em http://0.0.0.0:${port}`));
   }).catch((error) => {
     console.error('Falha ao inicializar o banco de dados:', error);
