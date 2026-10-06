@@ -286,10 +286,6 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
     } else if (dataFim) {
       conditions.push('date(r.data_inicio) <= ?');
       params.push(dataFim);
-    } else {
-      const hoje = new Date().toISOString().split('T')[0];
-      conditions.push('date(r.data_fim) >= ?');
-      params.push(hoje);
     }
 
     const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
