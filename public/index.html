@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f3f6f2">
-    <title> SyncStore | Espaços e frota</title>
+    <title>SyncStore | Espaços e frota</title>
     <meta name="description" content="Sistema interno para reservas de salas e veículos organizados em uma agenda só.">
     <meta property="og:title" content="Reserva | Espaços e frota">
     <meta property="og:description" content="Sistema interno para reservas de salas e veículos organizados em uma agenda só.">
@@ -81,9 +81,12 @@
                   <option value="caminhao">Caminhões</option>
                 </select>
               </label>
-              <!-- ADICIONADO: Filtro por data -->
-              <label class="filter-label">Data
-                <input type="date" id="date-filter">
+              <!-- Filtro de Intervalo de Datas -->
+              <label class="filter-label">Data Inicial
+                <input type="date" id="date-start-filter">
+              </label>
+              <label class="filter-label">Data Final
+                <input type="date" id="date-end-filter">
               </label>
               <button class="button button-secondary" id="export-reservations" type="button" title="Exportar reservas exibidas em CSV">Exportar CSV <span aria-hidden="true">↓</span></button>
             </div>
@@ -127,23 +130,4 @@
               </form>
               <div class="management-list" id="resource-list"></div>
             </section>
-            <section class="management-panel">
-              <div class="panel-heading"><span class="panel-icon panel-icon-coral">◎</span><div><h3>Usuários</h3><p>Contas com acesso à agenda.</p></div></div>
-              <form id="user-form" class="form-stack compact-form">
-                <label class="field">Nome<input name="nome" required maxlength="100" placeholder="Nome completo"></label>
-                <label class="field">E-mail<input name="email" type="email" required maxlength="150" placeholder="nome@empresa.com"></label>
-                <label class="field">Senha inicial<input name="senha" type="password" required minlength="6" placeholder="Mínimo de 6 caracteres"></label>
-                <label class="field">Permissão<select name="pode_editar"><option value="0">Somente fazer reservas</option><option value="1">Pode editar reservas</option></select></label>
-                <button class="button button-primary" type="submit">Adicionar usuário <span aria-hidden="true">＋</span></button>
-                <p class="form-message" id="user-message" role="status"></p>
-              </form>
-              <div class="management-list" id="user-list"></div>
-            </section>
-          </div>
-        </section>
-        <div class="toast" id="toast" role="status" aria-live="polite"></div>
-      </main>
-      <footer class="app-footer"><span>RESERVA<span class="brand-period">.</span></span><span>Organização que abre espaço.</span></footer>
-    </div>
-  </body>
-</html>
+            <section class
