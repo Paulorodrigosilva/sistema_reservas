@@ -273,11 +273,12 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       params.push(req.session.user.id);
     }
 
-    // Filtro por intervalo de datas (data_inicio e data_fim)
+    // Filtro estrito por intervalo de datas (Data Inicial e Data Final)
     const dataInicio = String(req.query.data_inicio || '').trim();
     const dataFim = String(req.query.data_fim || '').trim();
 
     if (dataInicio && dataFim) {
+      // Retorna reservas que cruzam ou estão contidas no intervalo [dataInicio, dataFim]
       conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
       params.push(dataFim, dataInicio);
     } else if (dataInicio) {
@@ -366,43 +367,4 @@ app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, 
       AND data_fim > ? AND data_inicio < ? LIMIT 1`, [recursoId, req.params.id, inicio, fim]);
     if (conflict) return res.status(409).json({ mensagem: 'Este recurso ja esta reservado nesse periodo.' });
     const previousOdometer = resource.tipo === 'sala' ? null : await getPreviousOdometer(recursoId, inicio, req.params.id);
-    const kmInicio = previousOdometer?.km_final ?? null;
-    if (kmInicio !== null && kmFinal !== null && kmFinal < kmInicio) {
-      return res.status(400).json({ mensagem: 'O KM de entrega nao pode ser menor que o KM inicial.' });
-    }
-    await run(`UPDATE reservas SET recurso_id = ?, motorista = ?, destino = ?, motivo = ?,
-      km_inicio = ?, km_final = ?, combustivel_inicio = NULL, combustivel_final = ?,
-      data_inicio = ?, data_fim = ? WHERE id = ?`, [
-      recursoId, motorista, destino, motivo, kmInicio, kmFinal,
-      combustivelFinal, inicio, fim, req.params.id
-    ]);
-    if (current.recurso_id !== recursoId) await updateFollowingOdometers(current.recurso_id);
-    if (resource.tipo !== 'sala') await updateFollowingOdometers(recursoId);
-    res.json({ mensagem: 'Reserva atualizada.' });
-  } catch (error) { handleError(res, error); }
-});
-
-app.delete('/api/reservas/:id', requireAuth, async (req, res) => {
-  try {
-    const result = req.session.user.tipo === 'master'
-      ? await run('DELETE FROM reservas WHERE id = ?', [req.params.id])
-      : await run('DELETE FROM reservas WHERE id = ? AND usuario_id = ?', [req.params.id, req.session.user.id]);
-    if (!result.changes) return res.status(404).json({ mensagem: 'Reserva nao encontrada.' });
-    res.json({ mensagem: 'Reserva cancelada.' });
-  } catch (error) { handleError(res, error); }
-});
-
-app.use('/api', (req, res) => res.status(404).json({ mensagem: 'Rota da API nao encontrada.' }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-
-if (require.main === module) {
-  ensureDatabaseReady().then(() => {
-    app.listen(port, '0.0.0.0', () => console.log(`Sistema de reservas disponivel em http://0.0.0.0:${port}`));
-  }).catch((error) => {
-    console.error('Falha ao inicializar o banco de dados:', error);
-    process.exit(1);
-  });
-}
-
-module.exports = app;
+    const kmInicio = previousOdometer?.
