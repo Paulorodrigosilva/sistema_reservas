@@ -276,35 +276,27 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
     const dataInicio = String(req.query.data_inicio || '').trim();
     const dataFim = String(req.query.data_fim || '').trim();
 
-    // Se o usuário preencheu ambos, busca reservas dentro do intervalo do período
     if (dataInicio && dataFim) {
+      // Se o usuário preencheu o intervalo de datas, filtra rigorosamente pelo período escolhido
       conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
       params.push(dataFim, dataInicio);
     } else if (dataInicio) {
-      // Se preencheu apenas a data inicial
       conditions.push('date(r.data_fim) >= ?');
       params.push(dataInicio);
     } else if (dataFim) {
-      // Se preencheu apenas a data final
       conditions.push('date(r.data_inicio) <= ?');
       params.push(dataFim);
+    } else {
+      // REGRA PADRÃO: Se nenhum filtro de data for preenchido, mostra apenas de hoje em diante
+      const hoje = new Date().toISOString().split('T')[0];
+      conditions.push('date(r.data_fim) >= ?');
+      params.push(hoje);
     }
 
     const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
     res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
   } catch (error) { handleError(res, error); }
 });
-app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
-  try {
-    const resource = await get('SELECT id, tipo FROM recursos WHERE id = ?', [req.params.id]);
-    if (!resource) return res.status(404).json({ mensagem: 'Recurso nao encontrado.' });
-    if (resource.tipo === 'sala') return res.status(400).json({ mensagem: 'Salas nao possuem odometro.' });
-    const startsAt = req.query.inicio || new Date().toISOString();
-    const previous = await getPreviousOdometer(req.params.id, startsAt);
-    res.json({ km_inicio_sugerido: previous?.km_final ?? null });
-  } catch (error) { handleError(res, error); }
-});
-
 app.post('/api/reservas', requireAuth, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
