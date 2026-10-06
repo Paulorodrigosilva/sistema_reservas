@@ -273,16 +273,19 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       params.push(req.session.user.id);
     }
 
-    // Se a query enviar uma data específica de filtro
-    const dataFiltro = String(req.query.data || '').trim();
-    if (dataFiltro) {
-      conditions.push('date(r.data_fim) >= ? AND date(r.data_inicio) <= ?');
-      params.push(dataFiltro, dataFiltro);
-    } else {
-      // Se não houver filtro de data informado, oculta as passadas (mostra de hoje em diante)
-      const hoje = new Date().toISOString().split('T')[0];
+    // Filtro por intervalo de datas (data_inicio e data_fim)
+    const dataInicio = String(req.query.data_inicio || '').trim();
+    const dataFim = String(req.query.data_fim || '').trim();
+
+    if (dataInicio && dataFim) {
+      conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
+      params.push(dataFim, dataInicio);
+    } else if (dataInicio) {
       conditions.push('date(r.data_fim) >= ?');
-      params.push(hoje);
+      params.push(dataInicio);
+    } else if (dataFim) {
+      conditions.push('date(r.data_inicio) <= ?');
+      params.push(dataFim);
     }
 
     const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
@@ -394,7 +397,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 if (require.main === module) {
-  ensureDatabaseReady().textn?.() || ensureDatabaseReady().then(() => {
+  ensureDatabaseReady().then(() => {
     app.listen(port, '0.0.0.0', () => console.log(`Sistema de reservas disponivel em http://0.0.0.0:${port}`));
   }).catch((error) => {
     console.error('Falha ao inicializar o banco de dados:', error);
