@@ -205,6 +205,36 @@ app.post('/api/usuarios', requireAuth, requireMaster, async (req, res) => {
   }
 });
 
+// EDITAR USUÁRIO (NOVA ROTA)
+app.put('/api/usuarios/:id', requireAuth, requireMaster, async (req, res) => {
+  const id = Number(req.params.id);
+  const nome = String(req.body.nome || '').trim();
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const senha = String(req.body.senha || '');
+  const podeEditar = req.body.pode_editar === true || req.body.pode_editar === '1' ? 1 : 0;
+
+  if (!nome || !email) {
+    return res.status(400).json({ mensagem: 'Informe nome e e-mail.' });
+  }
+
+  try {
+    if (senha && senha.length >= 6) {
+      const senhaHash = await bcrypt.hash(senha, 10);
+      await run('UPDATE usuarios SET nome = ?, email = ?, senha = ?, pode_editar = ? WHERE id = ?', [
+        nome, email, senhaHash, podeEditar, id
+      ]);
+    } else {
+      await run('UPDATE usuarios SET nome = ?, email = ?, pode_editar = ? WHERE id = ?', [
+        nome, email, podeEditar, id
+      ]);
+    }
+    res.json({ mensagem: 'Usuário atualizado com sucesso.' });
+  } catch (error) {
+    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail já está cadastrado.' });
+    handleError(res, error);
+  }
+});
+
 app.patch('/api/usuarios/:id/permissao', requireAuth, requireMaster, async (req, res) => {
   const podeEditar = req.body.pode_editar === true || req.body.pode_editar === 1 || req.body.pode_editar === '1' ? 1 : 0;
   try {
@@ -245,6 +275,25 @@ app.post('/api/recursos', requireAuth, requireMaster, async (req, res) => {
   } catch (error) { handleError(res, error); }
 });
 
+// EDITAR RECURSO (NOVA ROTA)
+app.put('/api/recursos/:id', requireAuth, requireMaster, async (req, res) => {
+  const id = Number(req.params.id);
+  const nome = String(req.body.nome || '').trim();
+  const tipo = String(req.body.tipo || '').trim();
+  const numero = String(req.body.numero || '').trim();
+
+  if (!nome || !['sala', 'carro', 'caminhao'].includes(tipo)) {
+    return res.status(400).json({ mensagem: 'Informe um nome e um tipo válido.' });
+  }
+
+  try {
+    await run('UPDATE recursos SET nome = ?, tipo = ?, numero = ? WHERE id = ?', [
+      nome, tipo, numero, id
+    ]);
+    res.json({ mensagem: 'Recurso atualizado com sucesso.' });
+  } catch (error) { handleError(res, error); }
+});
+
 app.delete('/api/recursos/:id', requireAuth, requireMaster, async (req, res) => {
   try {
     const reservations = await get('SELECT id FROM reservas WHERE recurso_id = ? LIMIT 1', [req.params.id]);
@@ -277,7 +326,6 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
     const dataFim = String(req.query.data_fim || '').trim();
 
     if (dataInicio && dataFim) {
-      // Se o usuário preencheu o intervalo de datas, filtra rigorosamente pelo período escolhido
       conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
       params.push(dataFim, dataInicio);
     } else if (dataInicio) {
@@ -287,7 +335,6 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       conditions.push('date(r.data_inicio) <= ?');
       params.push(dataFim);
     } else {
-      // REGRA PADRÃO: Se nenhum filtro de data for preenchido, mostra apenas de hoje em diante
       const hoje = new Date().toISOString().split('T')[0];
       conditions.push('date(r.data_fim) >= ?');
       params.push(hoje);
@@ -297,6 +344,7 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
     res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
   } catch (error) { handleError(res, error); }
 });
+
 app.post('/api/reservas', requireAuth, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
