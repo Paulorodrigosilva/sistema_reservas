@@ -273,7 +273,7 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       params.push(req.session.user.id);
     }
 
-    // Filtro por intervalo de datas (Data Inicial e Data Final)
+    // Filtro por intervalo de datas (data_inicio e data_fim)
     const dataInicio = String(req.query.data_inicio || '').trim();
     const dataFim = String(req.query.data_fim || '').trim();
 
