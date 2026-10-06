@@ -273,12 +273,13 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       params.push(req.session.user.id);
     }
 
-    // Filtro por intervalo de datas (data_inicio e data_fim)
+    // Filtro por intervalo de datas (Data Inicial e Data Final)
     const dataInicio = String(req.query.data_inicio || '').trim();
     const dataFim = String(req.query.data_fim || '').trim();
 
     if (dataInicio && dataFim) {
-      conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
+      // Abrange qualquer reserva que intersecte o intervalo escolhido (início até o fim do dia selecionado)
+      conditions.push('(date(r.data_inicio) <= ? AND date(r.data_fim) >= ?)');
       params.push(dataFim, dataInicio);
     } else if (dataInicio) {
       conditions.push('date(r.data_fim) >= ?');
