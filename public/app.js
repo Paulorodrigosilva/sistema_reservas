@@ -9,8 +9,8 @@ const reservationsList = document.querySelector('#reservation-list');
 const emptyState = document.querySelector('#empty-state');
 const resourceForm = document.querySelector('#resource-form');
 const userForm = document.querySelector('#user-form');
-const dateStartFilter = document.querySelector('#date-start-filter'); // Filtro Data Inicial
-const dateEndFilter = document.querySelector('#date-end-filter');     // Filtro Data Final
+const dateStartFilter = document.querySelector('#date-start-filter');
+const dateEndFilter = document.querySelector('#date-end-filter');
 
 let currentUser = null;
 let resources = [];
@@ -18,6 +18,8 @@ let reservations = [];
 let users = [];
 let authMode = 'login';
 let editingReservationId = null;
+let editingResourceId = null;
+let editingUserId = null;
 let toastTimer;
 
 async function api(url, options = {}) {
@@ -267,7 +269,10 @@ function renderResourceList() {
   list.innerHTML = resources.map((resource) => `<div class="management-row">
     <span class="row-symbol">${resource.tipo === 'sala' ? '⌂' : '↗'}</span>
     <div class="row-copy"><strong>${escapeHtml(resource.nome)}</strong><span>${escapeHtml(resource.tipo)}${resource.numero ? ` · ${escapeHtml(resource.numero)}` : ''}</span></div>
-    <button class="row-delete" type="button" data-delete-resource="${resource.id}" aria-label="Excluir ${escapeHtml(resource.nome)}" title="Excluir recurso">×</button>
+    <div class="management-actions">
+      <button class="row-edit" type="button" data-edit-resource="${resource.id}" title="Editar recurso">Editar</button>
+      <button class="row-delete" type="button" data-delete-resource="${resource.id}" aria-label="Excluir ${escapeHtml(resource.nome)}" title="Excluir recurso">×</button>
+    </div>
   </div>`).join('');
 }
 
@@ -278,7 +283,11 @@ function renderUsers() {
   list.innerHTML = users.map((user) => `<div class="management-row">
     <span class="row-symbol">◎</span>
     <div class="row-copy"><strong>${escapeHtml(user.nome)}</strong><span>${escapeHtml(user.email)} · ${user.tipo === 'master' ? 'Master' : Number(user.pode_editar) === 1 ? 'Pode editar reservas' : 'Somente reservas'}</span></div>
-    ${user.tipo === 'master' ? '' : `<button class="permission-button" type="button" data-toggle-user-permission="${user.id}" data-enabled="${Number(user.pode_editar) === 1 ? '1' : '0'}">${Number(user.pode_editar) === 1 ? 'Retirar edição' : 'Permitir edição'}</button><button class="row-delete" type="button" data-delete-user="${user.id}" aria-label="Excluir ${escapeHtml(user.nome)}" title="Excluir usuário">×</button>`}
+    <div class="management-actions">
+      ${user.tipo === 'master' ? '' : `<button class="permission-button" type="button" data-toggle-user-permission="${user.id}" data-enabled="${Number(user.pode_editar) === 1 ? '1' : '0'}">${Number(user.pode_editar) === 1 ? 'Retirar' : 'Permitir'}</button>`}
+      <button class="row-edit" type="button" data-edit-user="${user.id}" title="Editar usuário">Editar</button>
+      ${user.tipo === 'master' ? '' : `<button class="row-delete" type="button" data-delete-user="${user.id}" aria-label="Excluir ${escapeHtml(user.nome)}" title="Excluir usuário">×</button>`}
+    </div>
   </div>`).join('');
 }
 
@@ -383,26 +392,35 @@ reservationForm.addEventListener('submit', async (event) => {
   }
 });
 
+// SUBMIT DE RECURSO (CRIAÇÃO OU EDIÇÃO)
 resourceForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const message = document.querySelector('#resource-message');
   try {
-    await api('/api/recursos', { method: 'POST', body: Object.fromEntries(new FormData(resourceForm)) });
+    const method = editingResourceId ? 'PUT' : 'POST';
+    const endpoint = editingResourceId ? `/api/recursos/${editingResourceId}` : '/api/recursos';
+    await api(endpoint, { method, body: Object.fromEntries(new FormData(resourceForm)) });
     resourceForm.reset();
+    editingResourceId = null;
+    resourceForm.querySelector('button[type="submit"]').innerHTML = 'Adicionar recurso <span aria-hidden="true">＋</span>';
     await loadDashboard();
-    setMessage(message, 'Recurso adicionado.', true);
+    setMessage(message, editingResourceId ? 'Recurso atualizado.' : 'Recurso adicionado.', true);
   } catch (error) { setMessage(message, error.message); }
 });
 
+// SUBMIT DE USUÁRIO (CRIAÇÃO OU EDIÇÃO)
 userForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const message = document.querySelector('#user-message');
   try {
-    await api('/api/usuarios', { method: 'POST', body: Object.fromEntries(new FormData(userForm)) });
+    const method = editingUserId ? 'PUT' : 'POST';
+    const endpoint = editingUserId ? `/api/usuarios/${editingUserId}` : '/api/usuarios';
+    await api(endpoint, { method, body: Object.fromEntries(new FormData(userForm)) });
     userForm.reset();
-    users = await api('/api/usuarios');
-    renderUsers();
-    setMessage(message, 'Usuário adicionado com perfil comum.', true);
+    editingUserId = null;
+    userForm.querySelector('button[type="submit"]').innerHTML = 'Adicionar usuário <span aria-hidden="true">＋</span>';
+    await loadDashboard();
+    setMessage(message, 'Usuário atualizado com sucesso.', true);
   } catch (error) { setMessage(message, error.message); }
 });
 
@@ -410,7 +428,38 @@ document.addEventListener('click', async (event) => {
   const reservationButton = event.target.closest('[data-cancel-reservation]');
   const resourceButton = event.target.closest('[data-delete-resource]');
   const userButton = event.target.closest('[data-delete-user]');
+  const editResourceBtn = event.target.closest('[data-edit-resource]');
+  const editUserBtn = event.target.closest('[data-edit-user]');
+
   try {
+    if (editResourceBtn) {
+      const resId = Number(editResourceBtn.dataset.editResource);
+      const resource = resources.find(r => r.id === resId);
+      if (resource) {
+        editingResourceId = resource.id;
+        resourceForm.elements.tipo.value = resource.tipo;
+        resourceForm.elements.nome.value = resource.nome;
+        resourceForm.elements.numero.value = resource.numero || '';
+        resourceForm.querySelector('button[type="submit"]').innerHTML = 'Salvar alteração <span aria-hidden="true">✓</span>';
+        resourceForm.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+
+    if (editUserBtn) {
+      const uId = Number(editUserBtn.dataset.editUser);
+      const user = users.find(u => u.id === uId);
+      if (user) {
+        editingUserId = user.id;
+        userForm.elements.nome.value = user.nome;
+        userForm.elements.email.value = user.email;
+        userForm.elements.senha.value = '';
+        userForm.elements.senha.placeholder = 'Deixe em branco para manter';
+        userForm.elements.pode_editar.value = user.pode_editar ? '1' : '0';
+        userForm.querySelector('button[type="submit"]').innerHTML = 'Salvar alteração <span aria-hidden="true">✓</span>';
+        userForm.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+
     if (reservationButton && window.confirm('Cancelar esta reserva?')) {
       await api(`/api/reservas/${reservationButton.dataset.cancelReservation}`, { method: 'DELETE' });
       await loadDashboard();
@@ -423,19 +472,7 @@ document.addEventListener('click', async (event) => {
     }
     if (userButton && window.confirm('Excluir este usuário e suas reservas?')) {
       await api(`/api/usuarios/${userButton.dataset.deleteUser}`, { method: 'DELETE' });
-      users = await api('/api/usuarios');
-      
-      const dataInicio = dateStartFilter ? dateStartFilter.value : '';
-      const dataFim = dateEndFilter ? dateEndFilter.value : '';
-      let resUrl = '/api/reservas';
-      const qParams = [];
-      if (dataInicio) qParams.push(`data_inicio=${encodeURIComponent(dataInicio)}`);
-      if (dataFim) qParams.push(`data_fim=${encodeURIComponent(dataFim)}`);
-      if (qParams.length > 0) resUrl += `?${qParams.join('&')}`;
-
-      reservations = await api(resUrl);
-      renderUsers();
-      renderReservations();
+      await loadDashboard();
       showToast('Usuário excluído.');
     }
     const permissionButton = event.target.closest('[data-toggle-user-permission]');
@@ -444,8 +481,7 @@ document.addEventListener('click', async (event) => {
       await api(`/api/usuarios/${permissionButton.dataset.toggleUserPermission}/permissao`, {
         method: 'PATCH', body: { pode_editar: enable }
       });
-      users = await api('/api/usuarios');
-      renderUsers();
+      await loadDashboard();
       showToast(enable ? 'Permissão para editar ativada.' : 'Permissão para editar removida.');
     }
     const editButton = event.target.closest('[data-edit-reservation]');
