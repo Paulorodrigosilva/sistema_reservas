@@ -309,4 +309,29 @@ const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS
   FROM reservas r JOIN usuarios u ON u.id = r.usuario_id
   JOIN recursos x ON x.id = r.recurso_id`;
 
-// TODOS OS USUÁRIOS LOG
+app.get('/api/reservas', requireAuth, async (req, res) => {
+  try {
+    let conditions = [];
+    let params = [];
+
+    const dataInicio = String(req.query.data_inicio || '').trim();
+    const dataFim = String(req.query.data_fim || '').trim();
+
+    if (dataInicio && dataFim) {
+      conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
+      params.push(dataFim, dataInicio);
+    } else if (dataInicio) {
+      conditions.push('date(r.data_fim) >= ?');
+      params.push(dataInicio);
+    } else if (dataFim) {
+      conditions.push('date(r.data_inicio) <= ?');
+      params.push(dataFim);
+    } else {
+      const hoje = new Date().toISOString().split('T')[0];
+      conditions.push('date(r.data_fim) >= ?');
+      params.push(hoje);
+    }
+
+    const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+    res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
+  } catch (error) { handleError(res,
