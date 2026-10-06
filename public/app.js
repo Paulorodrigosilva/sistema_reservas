@@ -9,6 +9,7 @@ const reservationsList = document.querySelector('#reservation-list');
 const emptyState = document.querySelector('#empty-state');
 const resourceForm = document.querySelector('#resource-form');
 const userForm = document.querySelector('#user-form');
+const dateFilter = document.querySelector('#date-filter'); // NOVO: Referência ao filtro de data
 
 let currentUser = null;
 let resources = [];
@@ -281,8 +282,16 @@ function renderUsers() {
 }
 
 async function loadDashboard() {
-  const tasks = [api('/api/recursos'), api('/api/reservas')];
+  // ATUALIZADO: Pega a data selecionada no input de filtro de data e envia para a API
+  const selectedDate = dateFilter ? dateFilter.value : '';
+  let reservationsUrl = '/api/reservas';
+  if (selectedDate) {
+    reservationsUrl += `?data=${encodeURIComponent(selectedDate)}`;
+  }
+
+  const tasks = [api('/api/recursos'), api(reservationsUrl)];
   if (currentUser.tipo === 'master') tasks.push(api('/api/usuarios'));
+  
   const results = await Promise.all(tasks);
   resources = results[0];
   reservations = results[1];
@@ -340,6 +349,12 @@ resourceSelect.addEventListener('change', () => {
 });
 reservationForm.elements.inicio.addEventListener('change', fillSuggestedOdometer);
 document.querySelector('#reservation-filter').addEventListener('change', renderReservations);
+
+// NOVO: Atualiza o dashboard sempre que o filtro de data for alterado
+if (dateFilter) {
+  dateFilter.addEventListener('change', loadDashboard);
+}
+
 document.querySelector('#export-reservations').addEventListener('click', exportReservations);
 document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
 document.querySelector('#cancel-edit').addEventListener('click', () => setReservationEditMode());
@@ -405,7 +420,12 @@ document.addEventListener('click', async (event) => {
     if (userButton && window.confirm('Excluir este usuário e suas reservas?')) {
       await api(`/api/usuarios/${userButton.dataset.deleteUser}`, { method: 'DELETE' });
       users = await api('/api/usuarios');
-      reservations = await api('/api/reservas');
+      // ATUALIZADO: Garante que o fetch traga as reservas respeitando o filtro de data ativo
+      const selectedDate = dateFilter ? dateFilter.value : '';
+      let resUrl = '/api/reservas';
+      if (selectedDate) resUrl += `?data=${encodeURIComponent(selectedDate)}`;
+      reservations = await api(resUrl);
+      
       renderUsers();
       renderReservations();
       showToast('Usuário excluído.');
