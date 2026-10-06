@@ -309,6 +309,7 @@ const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS
   FROM reservas r JOIN usuarios u ON u.id = r.usuario_id
   JOIN recursos x ON x.id = r.recurso_id`;
 
+// TODOS OS USUÁRIOS LOGADOS PODEM VER TODAS AS RESERVAS
 app.get('/api/reservas', requireAuth, async (req, res) => {
   try {
     let conditions = [];
@@ -337,7 +338,8 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
   } catch (error) { handleError(res, error); }
 });
 
-app.post('/api/reservas', requireAuth, requireReservationEditor, async (req, res) => {
+// QUALQUER USUÁRIO LOGADO PODE FAZER UMA NOVA RESERVA
+app.post('/api/reservas', requireAuth, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
   const fim = String(req.body.fim || '').trim();
@@ -369,6 +371,7 @@ app.post('/api/reservas', requireAuth, requireReservationEditor, async (req, res
   } catch (error) { handleError(res, error); }
 });
 
+// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EDITAR RESERVAS
 app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
@@ -415,6 +418,7 @@ app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, 
   } catch (error) { handleError(res, error); }
 });
 
+// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EXCLUIR RESERVAS
 app.delete('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
   try {
     const result = req.session.user.tipo === 'master'
