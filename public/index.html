@@ -130,4 +130,23 @@
               </form>
               <div class="management-list" id="resource-list"></div>
             </section>
-            <section class
+            <section class="management-panel">
+              <div class="panel-heading"><span class="panel-icon panel-icon-coral">◎</span><div><h3>Usuários</h3><p>Contas com acesso à agenda.</p></div></div>
+              <form id="user-form" class="form-stack compact-form">
+                <label class="field">Nome<input name="nome" required maxlength="100" placeholder="Nome completo"></label>
+                <label class="field">E-mail<input name="email" type="email" required maxlength="150" placeholder="nome@empresa.com"></label>
+                <label class="field">Senha inicial<input name="senha" type="password" required minlength="6" placeholder="Mínimo de 6 caracteres"></label>
+                <label class="field">Permissão<select name="pode_editar"><option value="0">Somente fazer reservas</option><option value="1">Pode editar reservas</option></select></label>
+                <button class="button button-primary" type="submit">Adicionar usuário <span aria-hidden="true">＋</span></button>
+                <p class="form-message" id="user-message" role="status"></p>
+              </form>
+              <div class="management-list" id="user-list"></div>
+            </section>
+          </div>
+        </section>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </main>
+      <footer class="app-footer"><span>RESERVA<span class="brand-period">.</span></span><span>Organização que abre espaço.</span></footer>
+    </div>
+  </body>
+</html>
