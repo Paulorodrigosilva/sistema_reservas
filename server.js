@@ -273,18 +273,19 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       params.push(req.session.user.id);
     }
 
-    // Filtro por intervalo de datas (Data Inicial e Data Final) corrigido
     const dataInicio = String(req.query.data_inicio || '').trim();
     const dataFim = String(req.query.data_fim || '').trim();
 
+    // Se o usuário preencheu ambos, busca reservas dentro do intervalo do período
     if (dataInicio && dataFim) {
-      // Garante que pega qualquer reserva que intersecte o intervalo escolhido pelo usuário
       conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
       params.push(dataFim, dataInicio);
     } else if (dataInicio) {
+      // Se preencheu apenas a data inicial
       conditions.push('date(r.data_fim) >= ?');
       params.push(dataInicio);
     } else if (dataFim) {
+      // Se preencheu apenas a data final
       conditions.push('date(r.data_inicio) <= ?');
       params.push(dataFim);
     }
@@ -293,7 +294,6 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
     res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
   } catch (error) { handleError(res, error); }
 });
-
 app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
   try {
     const resource = await get('SELECT id, tipo FROM recursos WHERE id = ?', [req.params.id]);
