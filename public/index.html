@@ -3,21 +3,22 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f3f6f2">
-    <title>SyncStore | Espaços e frota</title>
-    <meta name="description" content="Sistema interno para reservas de salas e veículos organizados em uma agenda só.">
-    <meta property="og:title" content="Reserva | Espaços e frota">
-    <meta property="og:description" content="Sistema interno para reservas de salas e veículos organizados em uma agenda só.">
+    <meta name="theme-color" content="#fdf2f4">
+    <title>Studio de Cílios — Agendamentos</title>
+    <meta name="description" content="Sistema exclusivo para agendamento de procedimentos no Studio de Cílios.">
+    <meta property="og:title" content="Studio de Cílios — Agendamentos">
+    <meta property="og:description" content="Sistema exclusivo para agendamento de procedimentos no Studio de Cílios.">
+    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="style.css">
     
     <!-- Biblioteca QRCode.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="/app.js" defer></script>
+    <script src="app.js" defer></script>
 
-    <!-- Regras de Estilo e Impressão Corrigidas para o Crachá -->
+    <!-- Regras de Estilo e Impressão para o Crachá do Studio -->
     <style>
       .cracha-card {
         width: 320px;
@@ -86,161 +87,45 @@
     </style>
   </head>
   <body>
+    <!-- TELA DE AUTENTICAÇÃO (LOGIN / CADASTRO) -->
     <main id="auth-screen" class="auth-layout">
       <section class="auth-intro">
-        <div class="brand brand-light"><span class="brand-mark">S</span><span>SyncStore<span class="brand-period">.</span></span></div>
+        <div class="brand brand-light"><span class="brand-mark">S</span><span>Studio<span class="brand-period">.</span></span></div>
         <div class="intro-copy">
-          <p class="eyebrow">ESPAÇOS & FROTA</p>
-          <h1>O próximo<br>compromisso,<br><span>no lugar certo.</span></h1>
-          <p class="intro-note">Salas e veículos organizados em uma agenda só.</p>
+          <p class="eyebrow">BEM-VINDA AO STUDIO</p>
+          <h1>O olhar perfeito,<br><span>na hora certa.</span></h1>
+          <p class="intro-note">Agende procedimentos e consulte sua agenda com facilidade.</p>
         </div>
-        <div class="intro-foot"><span class="status-dot"></span> Reservas em tempo real</div>
+        <div class="intro-foot"><span class="status-dot"></span> Atendimento em tempo real</div>
       </section>
+      
       <section class="auth-panel">
         <div class="auth-box">
-          <div class="brand brand-dark"><span class="brand-mark">R</span><span>reserva<span class="brand-period">.</span></span></div>
-          <p class="eyebrow" id="auth-eyebrow">BEM-VINDO DE VOLTA</p>
+          <div class="brand brand-dark"><span class="brand-mark">S</span><span>studio<span class="brand-period">.</span></span></div>
+          <p class="eyebrow" id="auth-eyebrow">BEM-VINDA DE VOLTA</p>
           <h2 id="auth-title">Acesse sua conta</h2>
-          <p class="muted" id="auth-description">Entre para consultar a agenda e fazer uma reserva.</p>
+          <p class="muted" id="auth-description">Entre para consultar sua agenda ou marcar um procedimento.</p>
       
           <form id="auth-form" class="form-stack">
-            <label class="field" id="name-field" hidden>Nome completo<input name="nome" autocomplete="name" maxlength="100"></label>
-            <label class="field">E-mail<input name="email" type="email" autocomplete="email" required maxlength="150" placeholder="nome@empresa.com"></label>
-            <label class="field">Senha<input name="senha" type="password" autocomplete="current-password" required minlength="6" placeholder="Mínimo de 6 caracteres"></label>
+            <label class="field" id="name-field" hidden>Nome completo<input name="nome" autocomplete="name" maxlength="100" placeholder="Seu nome"></label>
+            <label class="field">E-mail<input name="email" type="email" autocomplete="email" required maxlength="150" placeholder="seu@email.com"></label>
+            <label class="field">Senha<input name="senha" type="password" autocomplete="current-password" required minlength="6" placeholder="Sua senha"></label>
             <button class="button button-primary button-wide" type="submit" id="auth-submit">Entrar <span aria-hidden="true">↗</span></button>
             <p class="form-message" id="auth-message" role="status"></p>
           </form>
+
+          <div class="auth-switch" style="margin-top: 1rem; display: flex; gap: 1rem; justify-content: center;">
+            <button type="button" data-auth-mode="login" class="is-active" style="background:none; border:none; cursor:pointer; font-weight:600;">Já tenho conta</button>
+            <button type="button" data-auth-mode="register" style="background:none; border:none; cursor:pointer; font-weight:600;">Criar conta</button>
+          </div>
         </div>
-        <p class="auth-caption">RESERVAS SIMPLES. TEMPO BEM USADO.</p>
+        <p class="auth-caption">BELEZA E PRATICIDADE NO SEU DIA A DIA.</p>
       </section>
     </main>
 
+    <!-- TELA PRINCIPAL DO APLICATIVO -->
     <div id="app-screen" class="app-shell" hidden>
       <header class="topbar">
-        <a class="brand brand-dark" href="#agenda" aria-label="SyncStore, início"><span class="brand-mark">S</span><span>SyncStore</span></a>
-        <nav class="main-nav" aria-label="Navegação principal">
-          <button class="nav-link is-active" type="button" data-view="agenda">Agenda</button>
-          <button class="nav-link admin-only" type="button" data-view="cadastros" hidden>Cadastros <span class="nav-count" id="admin-count">0</span></button>
-        </nav>
-        <div class="account-area"><span class="account-avatar" id="account-avatar">U</span><span class="account-name" id="account-name"></span><span class="account-role" id="account-role"></span><button id="logout-button" class="icon-button" type="button" aria-label="Sair" title="Sair">↗</button></div>
-      </header>
-
-      <main class="workspace">
-        <section class="page-heading">
-          <div><p class="eyebrow" id="page-eyebrow">CENTRAL DE RESERVAS</p><h1 id="page-title">Sua agenda, em ordem.</h1><p class="muted" id="page-subtitle">Reserve uma sala ou veículo e veja os próximos compromissos.</p></div>
-          <div class="today-chip"><span class="today-icon" aria-hidden="true">▦</span><span id="today-label"></span></div>
-        </section>
-
-        <section class="stats-row" aria-label="Resumo da agenda">
-          <article class="stat-block"><span class="stat-label">MINHAS RESERVAS</span><strong id="stat-mine">0</strong><span class="stat-foot">na agenda</span></article>
-          <article class="stat-block"><span class="stat-label">PRÓXIMA RESERVA</span><strong id="stat-next">—</strong><span class="stat-foot" id="stat-next-detail">Nenhuma reserva futura</span></article>
-          <article class="stat-block stat-accent"><span class="stat-label">RECURSOS DISPONÍVEIS</span><strong id="stat-resources">0</strong><span class="stat-foot">salas e veículos</span></article>
-        </section>
-
-        <section class="view-panel is-visible" id="agenda-view">
-          <div class="section-heading">
-            <div><p class="eyebrow">AGENDA</p><h2>Agendamentos</h2></div>
-            <div class="agenda-tools">
-              <label class="filter-label">Filtrar por tipo
-                <select id="reservation-filter">
-                  <option value="todos">Todos os recursos</option>
-                  <option value="sala">Salas</option>
-                  <option value="carro">Carros</option>
-                  <option value="caminhao">Caminhões</option>
-                </select>
-              </label>
-              <label class="filter-label">Data Inicial
-                <input type="date" id="date-start-filter">
-              </label>
-              <label class="filter-label">Data Final
-                <input type="date" id="date-end-filter">
-              </label>
-              <button class="button button-secondary" id="export-reservations" type="button" title="Exportar reservas exibidas em CSV">Exportar CSV <span aria-hidden="true">↓</span></button>
-            </div>
-          </div>
-          <div class="agenda-layout">
-            <section class="booking-panel">
-              <div class="panel-heading"><span class="panel-icon">＋</span><div><h3 id="booking-title">Nova reserva</h3><p id="booking-description">Escolha o recurso e o período.</p></div></div>
-              <form id="reservation-form" class="form-stack">
-                <label class="field">Recurso<select name="recurso_id" id="resource-select" required><option value="">Selecione um recurso</option></select></label>
-                <div class="field-pair"><label class="field">Início<input name="inicio" type="datetime-local" required></label><label class="field">Fim<input name="fim" type="datetime-local" required></label></div>
-                <div id="vehicle-fields" class="form-stack" hidden>
-                  <label class="field">Motorista<input name="motorista" maxlength="100" placeholder="Nome do motorista"></label>
-                  <label class="field">Destino<input name="destino" maxlength="160" placeholder="Cidade, endereço ou local"></label>
-                  <label class="field">KM inicial · automático<input name="km_inicio" type="number" min="0" step="0.1" readonly placeholder="Será preenchido pelo último KM final"></label>
-                  <label class="field completion-field" hidden>KM final<input name="km_final" type="number" min="0" step="0.1" placeholder="Preencha ao finalizar a corrida"></label>
-                  <label class="field completion-field" hidden>Combustível na entrega<select name="combustivel_final"><option value="">Selecione ao finalizar</option><option value="0">Vazio · 0%</option><option value="25">¼ · 25%</option><option value="50">½ · 50%</option><option value="75">¾ · 75%</option><option value="100">Cheio · 100%</option></select></label>
-                </div>
-                <label class="field">Motivo da reserva <span class="optional-label">opcional</span><textarea name="motivo" rows="2" maxlength="240" placeholder="Reunião, visita técnica..."></textarea></label>
-                <div class="form-actions"><button class="button button-primary button-wide" type="submit" id="reservation-submit">Confirmar reserva <span aria-hidden="true">↗</span></button><button class="button button-secondary button-wide" type="button" id="cancel-edit" hidden>Cancelar edição</button></div>
-                <p class="form-message" id="reservation-message" role="status"></p>
-              </form>
-            </section>
-            <section class="reservations-panel">
-              <div id="reservation-list" class="reservation-list" aria-live="polite"></div>
-              <div id="empty-state" class="empty-state" hidden><span class="empty-symbol">▦</span><h3>Agenda livre por aqui.</h3><p>Quando fizer uma reserva, ela aparece nesta lista.</p></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="view-panel" id="cadastros-view" hidden>
-          <div class="section-heading"><div><p class="eyebrow">ADMINISTRAÇÃO MASTER</p><h2>Cadastros</h2></div><span class="admin-badge"><span class="status-dot"></span> Acesso master</span></div>
-          <div class="management-grid">
-            <section class="management-panel">
-              <div class="panel-heading"><span class="panel-icon">⌂</span><div><h3>Recursos</h3><p>Salas, carros e caminhões.</p></div></div>
-              <form id="resource-form" class="form-stack compact-form">
-                <label class="field">Tipo<select name="tipo" id="resource-type" required><option value="sala">Sala</option><option value="carro">Carro</option><option value="caminhao">Caminhão</option></select></label>
-                <label class="field">Nome<input name="nome" required maxlength="100" placeholder="Ex.: Sala Ipê, Fiat Argo"></label>
-                <label class="field" id="resource-number-field">Número ou placa<input name="numero" maxlength="30" placeholder="Ex.: 12 ou ABC1D23"></label>
-                <button class="button button-primary" type="submit">Adicionar recurso <span aria-hidden="true">＋</span></button>
-                <p class="form-message" id="resource-message" role="status"></p>
-              </form>
-              <div class="management-list" id="resource-list"></div>
-            </section>
-            <section class="management-panel">
-              <div class="panel-heading"><span class="panel-icon panel-icon-coral">◎</span><div><h3>Usuários</h3><p>Contas com acesso à agenda.</p></div></div>
-              <form id="user-form" class="form-stack compact-form">
-                <label class="field">Nome<input name="nome" required maxlength="100" placeholder="Nome completo"></label>
-                <label class="field">E-mail<input name="email" type="email" required maxlength="150" placeholder="nome@empresa.com"></label>
-                <label class="field">Senha inicial<input name="senha" type="password" required minlength="6" placeholder="Mínimo de 6 caracteres"></label>
-                <label class="field">Permissão<select name="pode_editar"><option value="0">Somente fazer reservas</option><option value="1">Pode editar reservas</option></select></label>
-                <button class="button button-primary" type="submit">Adicionar usuário <span aria-hidden="true">＋</span></button>
-                <p class="form-message" id="user-message" role="status"></p>
-              </form>
-              <div class="management-list" id="user-list"></div>
-            </section>
-          </div>
-        </section>
-
-        <!-- SEÇÃO DO CRACHÁ DIGITAL -->
-        <section class="view-panel" id="cracha-view">
-          <div class="section-heading">
-            <div><p class="eyebrow">IDENTIFICAÇÃO</p><h2>Meu Crachá Digital</h2></div>
-          </div>
-          <div class="cracha-card">
-            <div id="qrcode"></div>
-            <p style="font-size: 11px; margin-top: 8px; color: #475569;">Escaneie para validar o perfil</p>
-          </div>
-        </section>
-
-        <div class="toast" id="toast" role="status" aria-live="polite"></div>
-      </main>
-      <footer class="app-footer"><span>RESERVA<span class="brand-period">.</span></span><span>Organização que abre espaço.</span></footer>
-    </div>
-
-    <!-- SCRIPT DE GERAÇÃO DO QR CODE -->
-    <script>
-      const baseUrl = window.location.origin;
-      const linkPerfil = `${baseUrl}/perfil.html?id=12345`;
-
-      new QRCode(document.getElementById("qrcode"), {
-        text: linkPerfil,
-        width: 96,
-        height: 96,
-        colorDark: "#000000",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.H
-      });
-    </script>
-  </body>
-</html>
+        <a class="brand brand-dark" href="#agenda" aria-label="Studio de Cílios, início"><span class="brand-mark">S</span><span>Studio de Cílios</span></a>
+        
+        <nav class="main-nav" aria-label="N
