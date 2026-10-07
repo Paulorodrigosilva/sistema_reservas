@@ -12,7 +12,62 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
+    
+    <!-- 1. Biblioteca QRCode.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="/app.js" defer></script>
+
+    <!-- 2. Regras de Estilo e Impressão para o Crachá -->
+    <style>
+      /* Estilo visual da caixa do crachá na tela */
+      .cracha-card {
+        width: 320px;
+        height: 200px;
+        background: #ffffff;
+        border: 2px dashed #cbd5e1;
+        border-radius: 12px;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        margin: 20px auto;
+        text-align: center;
+      }
+
+      /* Configuração exata para a impressora de crachás (Ctrl + P) */
+      @media print {
+        body * {
+          visibility: hidden !important;
+        }
+
+        #cracha-view, #cracha-view * {
+          visibility: visible !important;
+        }
+
+        #cracha-view {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 85.6mm !important;  /* Largura padrão oficial CR-80 */
+          height: 54mm !important;   /* Altura padrão oficial CR-80 */
+          margin: 0 !important;
+          padding: 4mm !important;
+          background: #ffffff !important;
+          box-sizing: border-box !important;
+        }
+
+        .cracha-card {
+          width: 100% !important;
+          height: 100% !important;
+          border: 2px dashed #000000 !important; /* Força a borda visível na impressão */
+          box-shadow: none !important;
+          margin: 0 !important;
+          border-radius: 0 !important;
+        }
+      }
+    </style>
   </head>
   <body>
     <main id="auth-screen" class="auth-layout">
@@ -141,9 +196,36 @@
             </section>
           </div>
         </section>
+
+        <!-- SEÇÃO DO CRACHÁ DIGITAL COM AS BORDA E O QR CODE -->
+        <section class="view-panel" id="cracha-view">
+          <div class="section-heading">
+            <div><p class="eyebrow">IDENTIFICAÇÃO</p><h2>Meu Crachá Digital</h2></div>
+          </div>
+          <div class="cracha-card">
+            <div id="qrcode"></div>
+            <p style="font-size: 11px; margin-top: 8px; color: #475569;">Escaneie para validar o perfil</p>
+          </div>
+        </section>
+
         <div class="toast" id="toast" role="status" aria-live="polite"></div>
       </main>
       <footer class="app-footer"><span>RESERVA<span class="brand-period">.</span></span><span>Organização que abre espaço.</span></footer>
     </div>
+
+    <!-- SCRIPT DE GERAÇÃO DO QR CODE DINÂMICO -->
+    <script>
+      const baseUrl = window.location.origin;
+      const linkPerfil = `${baseUrl}/perfil.html?id=12345`; // Altere para o ID dinâmico do usuário
+
+      new QRCode(document.getElementById("qrcode"), {
+        text: linkPerfil,
+        width: 96,
+        height: 96,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    </script>
   </body>
 </html>
