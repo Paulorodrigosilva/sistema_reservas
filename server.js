@@ -20,7 +20,6 @@ const sessionSecret = (process.env.SESSION_SECRET || '').trim() || 'chave-local-
 
 app.use(express.json({ limit: '32kb' }));
 app.set('trust proxy', 1);
-
 app.use((req, res, next) => {
   const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
   return cookieSession({
@@ -32,7 +31,6 @@ app.use((req, res, next) => {
     maxAge: sessionMaxAge
   })(req, res, next);
 });
-
 app.use((req, res, next) => {
   const issuedAt = req.session?.issuedAt;
   if (req.session && (!Number.isFinite(issuedAt) || issuedAt > Date.now() || Date.now() - issuedAt > sessionMaxAge)) {
@@ -41,19 +39,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Middleware de segurança para o banco
-app.use(async (req, res, next) => {
-  try {
-    await ensureDatabaseReady();
-    next();
-  } catch (error) {
-    console.error('Erro ao conectar no banco:', error);
-    res.status(500).json({ mensagem: 'Erro de conexão com o banco de dados.' });
-  }
-});
-
 app.get('/api/health', async (req, res) => {
   try {
+    await ensureDatabaseReady();
     res.json({
       ok: true,
       ambiente: isVercel ? 'vercel' : 'node',
@@ -61,8 +49,16 @@ app.get('/api/health', async (req, res) => {
       origem_banco: getDatabaseTarget()
     });
   } catch (error) {
-    res.status(500).json({ ok: false, mensagem: 'Falha no healthcheck.' });
+    console.error('Falha no healthcheck do banco:', error);
+    res.status(500).json({ ok: false, mensagem: 'Falha na conexao com o banco de dados.' });
   }
+});
+
+app.use((req, res, next) => {
+  ensureDatabaseReady().then(() => next()).catch((error) => {
+    console.error('Erro ao preparar banco:', error);
+    handleError(res, error);
+  });
 });
 
 function requireAuth(req, res, next) {
@@ -95,33 +91,25 @@ function validFuelLevel(value) {
 }
 
 async function getPreviousOdometer(resourceId, startsAt, excludeId) {
-  try {
-    const excludedReservation = excludeId ? ' AND id != ?' : '';
-    const params = [resourceId, startsAt];
-    if (excludeId) params.push(excludeId);
-    return await get(`SELECT km_final FROM reservas WHERE recurso_id = ? AND km_final IS NOT NULL
-      AND datetime(data_fim) <= datetime(?)${excludedReservation}
-      ORDER BY datetime(data_fim) DESC, id DESC LIMIT 1`, params);
-  } catch (e) {
-    return null;
-  }
+  const excludedReservation = excludeId ? ' AND id != ?' : '';
+  const params = [resourceId, startsAt];
+  if (excludeId) params.push(excludeId);
+  return get(`SELECT km_final FROM reservas WHERE recurso_id = ? AND km_final IS NOT NULL
+    AND datetime(data_fim) <= datetime(?)${excludedReservation}
+    ORDER BY datetime(data_fim) DESC, id DESC LIMIT 1`, params);
 }
 
 async function updateFollowingOdometers(resourceId) {
-  try {
-    const rows = await all(`SELECT id, km_inicio, km_final FROM reservas WHERE recurso_id = ?
-      ORDER BY datetime(data_inicio), id`, [resourceId]);
-    let latestKm = null;
-    for (const row of rows) {
-      if (latestKm !== null) {
-        await run('UPDATE reservas SET km_inicio = ? WHERE id = ?', [latestKm, row.id]);
-      } else if (row.km_inicio !== null && row.km_inicio !== undefined) {
-        latestKm = Number(row.km_inicio);
-      }
-      if (row.km_final !== null && row.km_final !== undefined) latestKm = Number(row.km_final);
+  const rows = await all(`SELECT id, km_inicio, km_final FROM reservas WHERE recurso_id = ?
+    ORDER BY datetime(data_inicio), id`, [resourceId]);
+  let latestKm = null;
+  for (const row of rows) {
+    if (latestKm !== null) {
+      await run('UPDATE reservas SET km_inicio = ? WHERE id = ?', [latestKm, row.id]);
+    } else if (row.km_inicio !== null && row.km_inicio !== undefined) {
+      latestKm = Number(row.km_inicio);
     }
-  } catch (e) {
-    console.error('Erro ao atualizar odômetros:', e);
+    if (row.km_final !== null && row.km_final !== undefined) latestKm = Number(row.km_final);
   }
 }
 
@@ -143,7 +131,7 @@ app.post('/api/cadastro', async (req, res) => {
     ]);
     res.status(201).json({ id: result.id, mensagem: 'Cadastro criado. Agora voce ja pode entrar.' });
   } catch (error) {
-    if (isConstraintError && isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
+    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
     handleError(res, error);
   }
 });
@@ -212,7 +200,7 @@ app.post('/api/usuarios', requireAuth, requireMaster, async (req, res) => {
     ]);
     res.status(201).json({ id: result.id, mensagem: 'Usuario adicionado.' });
   } catch (error) {
-    if (isConstraintError && isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
+    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
     handleError(res, error);
   }
 });
@@ -241,7 +229,7 @@ app.put('/api/usuarios/:id', requireAuth, requireMaster, async (req, res) => {
     }
     res.json({ mensagem: 'Usuário atualizado com sucesso.' });
   } catch (error) {
-    if (isConstraintError && isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail já está cadastrado.' });
+    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail já está cadastrado.' });
     handleError(res, error);
   }
 });
@@ -314,17 +302,6 @@ app.delete('/api/recursos/:id', requireAuth, requireMaster, async (req, res) => 
   } catch (error) { handleError(res, error); }
 });
 
-app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
-  try {
-    const resourceId = Number(req.params.id);
-    const startsAt = req.query.inicio || new Date().toISOString();
-    const previousOdometer = await getPreviousOdometer(resourceId, startsAt);
-    res.json({ km_inicio_sugerido: previousOdometer?.km_final ?? null });
-  } catch (error) {
-    res.json({ km_inicio_sugerido: null });
-  }
-});
-
 const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS recurso_id,
   x.nome AS recurso, x.tipo AS tipo_recurso, x.numero, r.motorista, r.destino, r.motivo,
   r.km_inicio, r.km_final, r.combustivel_inicio, r.combustivel_final,
@@ -332,6 +309,7 @@ const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS
   FROM reservas r JOIN usuarios u ON u.id = r.usuario_id
   JOIN recursos x ON x.id = r.recurso_id`;
 
+// TODOS OS USUÁRIOS LOGADOS PODEM VER TODAS AS RESERVAS
 app.get('/api/reservas', requireAuth, async (req, res) => {
   try {
     let conditions = [];
@@ -360,6 +338,7 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
   } catch (error) { handleError(res, error); }
 });
 
+// QUALQUER USUÁRIO LOGADO PODE FAZER UMA NOVA RESERVA
 app.post('/api/reservas', requireAuth, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
@@ -392,6 +371,7 @@ app.post('/api/reservas', requireAuth, async (req, res) => {
   } catch (error) { handleError(res, error); }
 });
 
+// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EDITAR RESERVAS
 app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
@@ -438,6 +418,7 @@ app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, 
   } catch (error) { handleError(res, error); }
 });
 
+// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EXCLUIR RESERVAS
 app.delete('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
   try {
     const result = req.session.user.tipo === 'master'
