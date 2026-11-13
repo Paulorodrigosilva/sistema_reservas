@@ -20,6 +20,7 @@ const sessionSecret = (process.env.SESSION_SECRET || '').trim() || 'chave-local-
 
 app.use(express.json({ limit: '32kb' }));
 app.set('trust proxy', 1);
+
 app.use((req, res, next) => {
   const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
   return cookieSession({
@@ -31,6 +32,7 @@ app.use((req, res, next) => {
     maxAge: sessionMaxAge
   })(req, res, next);
 });
+
 app.use((req, res, next) => {
   const issuedAt = req.session?.issuedAt;
   if (req.session && (!Number.isFinite(issuedAt) || issuedAt > Date.now() || Date.now() - issuedAt > sessionMaxAge)) {
@@ -39,9 +41,19 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/api/health', async (req, res) => {
+// Inicialização segura do banco sem bloquear rotas estáticas
+app.use(async (req, res, next) => {
   try {
     await ensureDatabaseReady();
+    next();
+  } catch (error) {
+    console.error('Erro crítico ao preparar banco:', error);
+    res.status(500).json({ mensagem: 'Banco de dados temporariamente indisponível.' });
+  }
+});
+
+app.get('/api/health', async (req, res) => {
+  try {
     res.json({
       ok: true,
       ambiente: isVercel ? 'vercel' : 'node',
@@ -49,16 +61,8 @@ app.get('/api/health', async (req, res) => {
       origem_banco: getDatabaseTarget()
     });
   } catch (error) {
-    console.error('Falha no healthcheck do banco:', error);
-    res.status(500).json({ ok: false, mensagem: 'Falha na conexao com o banco de dados.' });
+    res.status(500).json({ ok: false, mensagem: 'Falha no healthcheck do banco.' });
   }
-});
-
-app.use((req, res, next) => {
-  ensureDatabaseReady().then(() => next()).catch((error) => {
-    console.error('Erro ao preparar banco:', error);
-    handleError(res, error);
-  });
 });
 
 function requireAuth(req, res, next) {
@@ -302,7 +306,7 @@ app.delete('/api/recursos/:id', requireAuth, requireMaster, async (req, res) => 
   } catch (error) { handleError(res, error); }
 });
 
-// Rota de odômetro blindada (retorna nulo se houver qualquer falha, sem quebrar o login)
+// Rota de odômetro segura
 app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
   try {
     const resourceId = Number(req.params.id);
