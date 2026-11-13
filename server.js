@@ -140,10 +140,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
     const senha = String(req.body.senha || '');
-
-    if (!email || !senha) {
-      return res.status(400).json({ mensagem: 'Informe e-mail e senha.' });
-    }
+    if (!email || !senha) return res.status(400).json({ mensagem: 'Informe e-mail e senha.' });
 
     const user = await get('SELECT * FROM usuarios WHERE email = ?', [email]);
     if (!user) return res.status(401).json({ mensagem: 'E-mail ou senha incorretos.' });
@@ -152,7 +149,6 @@ app.post('/api/login', async (req, res) => {
     const passwordIsHashed = storedPassword.startsWith('$2');
     const passwordMatches = passwordIsHashed ? await bcrypt.compare(senha, storedPassword) : senha === storedPassword;
     if (!passwordMatches) return res.status(401).json({ mensagem: 'E-mail ou senha incorretos.' });
-
     if (!passwordIsHashed) {
       await run('UPDATE usuarios SET senha = ? WHERE id = ?', [await bcrypt.hash(senha, 10), user.id]);
     }
@@ -211,10 +207,7 @@ app.put('/api/usuarios/:id', requireAuth, requireMaster, async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const senha = String(req.body.senha || '');
   const podeEditar = req.body.pode_editar === true || req.body.pode_editar === '1' ? 1 : 0;
-
-  if (!nome || !email) {
-    return res.status(400).json({ mensagem: 'Informe nome e e-mail.' });
-  }
+  if (!nome || !email) return res.status(400).json({ mensagem: 'Informe nome e e-mail.' });
 
   try {
     if (senha && senha.length >= 6) {
@@ -223,9 +216,7 @@ app.put('/api/usuarios/:id', requireAuth, requireMaster, async (req, res) => {
         nome, email, senhaHash, podeEditar, id
       ]);
     } else {
-      await run('UPDATE usuarios SET nome = ?, email = ?, pode_editar = ? WHERE id = ?', [
-        nome, email, podeEditar, id
-      ]);
+      await run('UPDATE usuarios SET nome = ?, email = ?, pode_editar = ? WHERE id = ?', [nome, email, podeEditar, id]);
     }
     res.json({ mensagem: 'Usuário atualizado com sucesso.' });
   } catch (error) {
@@ -237,9 +228,7 @@ app.put('/api/usuarios/:id', requireAuth, requireMaster, async (req, res) => {
 app.patch('/api/usuarios/:id/permissao', requireAuth, requireMaster, async (req, res) => {
   const podeEditar = req.body.pode_editar === true || req.body.pode_editar === 1 || req.body.pode_editar === '1' ? 1 : 0;
   try {
-    const result = await run('UPDATE usuarios SET pode_editar = ? WHERE id = ? AND tipo != ?', [
-      podeEditar, req.params.id, 'master'
-    ]);
+    const result = await run('UPDATE usuarios SET pode_editar = ? WHERE id = ? AND tipo != ?', [podeEditar, req.params.id, 'master']);
     if (!result.changes) return res.status(404).json({ mensagem: 'Usuario comum nao encontrado.' });
     res.json({ mensagem: podeEditar ? 'Permissao para editar ativada.' : 'Permissao para editar removida.' });
   } catch (error) { handleError(res, error); }
@@ -261,6 +250,21 @@ app.get('/api/recursos', requireAuth, async (req, res) => {
   catch (error) { handleError(res, error); }
 });
 
+// The frontend requests this when a vehicle is selected in the reservation form.
+app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
+  const recursoId = Number(req.params.id);
+  const inicio = String(req.query.inicio || new Date().toISOString()).trim();
+  if (!Number.isInteger(recursoId) || recursoId < 1) {
+    return res.status(400).json({ mensagem: 'Recurso invalido.' });
+  }
+  try {
+    const resource = await get('SELECT tipo FROM recursos WHERE id = ?', [recursoId]);
+    if (!resource) return res.status(404).json({ mensagem: 'Recurso nao encontrado.' });
+    const previous = resource.tipo === 'sala' ? null : await getPreviousOdometer(recursoId, inicio);
+    res.json({ km_inicio_sugerido: previous?.km_final ?? null });
+  } catch (error) { handleError(res, error); }
+});
+
 app.post('/api/recursos', requireAuth, requireMaster, async (req, res) => {
   const nome = String(req.body.nome || '').trim();
   const tipo = String(req.body.tipo || '').trim();
@@ -279,15 +283,11 @@ app.put('/api/recursos/:id', requireAuth, requireMaster, async (req, res) => {
   const nome = String(req.body.nome || '').trim();
   const tipo = String(req.body.tipo || '').trim();
   const numero = String(req.body.numero || '').trim();
-
   if (!nome || !['sala', 'carro', 'caminhao'].includes(tipo)) {
     return res.status(400).json({ mensagem: 'Informe um nome e um tipo válido.' });
   }
-
   try {
-    await run('UPDATE recursos SET nome = ?, tipo = ?, numero = ? WHERE id = ?', [
-      nome, tipo, numero, id
-    ]);
+    await run('UPDATE recursos SET nome = ?, tipo = ?, numero = ? WHERE id = ?', [nome, tipo, numero, id]);
     res.json({ mensagem: 'Recurso atualizado com sucesso.' });
   } catch (error) { handleError(res, error); }
 });
@@ -309,15 +309,13 @@ const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS
   FROM reservas r JOIN usuarios u ON u.id = r.usuario_id
   JOIN recursos x ON x.id = r.recurso_id`;
 
-// TODOS OS USUÁRIOS LOGADOS PODEM VER TODAS AS RESERVAS
+// Todos os usuários autenticados podem consultar a agenda completa.
 app.get('/api/reservas', requireAuth, async (req, res) => {
   try {
-    let conditions = [];
-    let params = [];
-
+    const conditions = [];
+    const params = [];
     const dataInicio = String(req.query.data_inicio || '').trim();
     const dataFim = String(req.query.data_fim || '').trim();
-
     if (dataInicio && dataFim) {
       conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
       params.push(dataFim, dataInicio);
@@ -328,17 +326,14 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       conditions.push('date(r.data_inicio) <= ?');
       params.push(dataFim);
     } else {
-      const hoje = new Date().toISOString().split('T')[0];
       conditions.push('date(r.data_fim) >= ?');
-      params.push(hoje);
+      params.push(new Date().toISOString().split('T')[0]);
     }
-
-    const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
   } catch (error) { handleError(res, error); }
 });
 
-// QUALQUER USUÁRIO LOGADO PODE FAZER UMA NOVA RESERVA
 app.post('/api/reservas', requireAuth, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
@@ -364,14 +359,12 @@ app.post('/api/reservas', requireAuth, async (req, res) => {
       (usuario_id, recurso_id, motorista, destino, motivo, km_inicio, km_final,
        combustivel_final, data_inicio, data_fim)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
-      req.session.user.id, recursoId, motorista, destino, motivo, kmInicio, null,
-      null, inicio, fim
+      req.session.user.id, recursoId, motorista, destino, motivo, kmInicio, null, null, inicio, fim
     ]);
     res.status(201).json({ id: result.id, mensagem: 'Reserva realizada.' });
   } catch (error) { handleError(res, error); }
 });
 
-// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EDITAR RESERVAS
 app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
   const recursoId = Number(req.body.recurso_id);
   const inicio = String(req.body.inicio || '').trim();
@@ -409,8 +402,7 @@ app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, 
     await run(`UPDATE reservas SET recurso_id = ?, motorista = ?, destino = ?, motivo = ?,
       km_inicio = ?, km_final = ?, combustivel_inicio = NULL, combustivel_final = ?,
       data_inicio = ?, data_fim = ? WHERE id = ?`, [
-      recursoId, motorista, destino, motivo, kmInicio, kmFinal,
-      combustivelFinal, inicio, fim, req.params.id
+      recursoId, motorista, destino, motivo, kmInicio, kmFinal, combustivelFinal, inicio, fim, req.params.id
     ]);
     if (current.recurso_id !== recursoId) await updateFollowingOdometers(current.recurso_id);
     if (resource.tipo !== 'sala') await updateFollowingOdometers(recursoId);
@@ -418,7 +410,6 @@ app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, 
   } catch (error) { handleError(res, error); }
 });
 
-// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EXCLUIR RESERVAS
 app.delete('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
   try {
     const result = req.session.user.tipo === 'master'
