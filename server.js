@@ -90,6 +90,10 @@ function validFuelLevel(value) {
   return value === null || (Number.isInteger(value) && value >= 0 && value <= 100);
 }
 
+function isValidDateTime(value) {
+  return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Date.parse(value));
+}
+
 async function getPreviousOdometer(resourceId, startsAt, excludeId) {
   const excludedReservation = excludeId ? ' AND id != ?' : '';
   const params = [resourceId, startsAt];
@@ -177,9 +181,8 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/usuarios', requireAuth, requireMaster, async (req, res) => {
-  try {
-    res.json(await all('SELECT id, nome, email, tipo, pode_editar FROM usuarios ORDER BY nome'));
-  } catch (error) { handleError(res, error); }
+  try { res.json(await all('SELECT id, nome, email, tipo, pode_editar FROM usuarios ORDER BY nome')); }
+  catch (error) { handleError(res, error); }
 });
 
 app.post('/api/usuarios', requireAuth, requireMaster, async (req, res) => {
@@ -208,12 +211,10 @@ app.put('/api/usuarios/:id', requireAuth, requireMaster, async (req, res) => {
   const senha = String(req.body.senha || '');
   const podeEditar = req.body.pode_editar === true || req.body.pode_editar === '1' ? 1 : 0;
   if (!nome || !email) return res.status(400).json({ mensagem: 'Informe nome e e-mail.' });
-
   try {
     if (senha && senha.length >= 6) {
-      const senhaHash = await bcrypt.hash(senha, 10);
       await run('UPDATE usuarios SET nome = ?, email = ?, senha = ?, pode_editar = ? WHERE id = ?', [
-        nome, email, senhaHash, podeEditar, id
+        nome, email, await bcrypt.hash(senha, 10), podeEditar, id
       ]);
     } else {
       await run('UPDATE usuarios SET nome = ?, email = ?, pode_editar = ? WHERE id = ?', [nome, email, podeEditar, id]);
@@ -250,12 +251,11 @@ app.get('/api/recursos', requireAuth, async (req, res) => {
   catch (error) { handleError(res, error); }
 });
 
-// The frontend requests this when a vehicle is selected in the reservation form.
 app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
   const recursoId = Number(req.params.id);
   const inicio = String(req.query.inicio || new Date().toISOString()).trim();
-  if (!Number.isInteger(recursoId) || recursoId < 1) {
-    return res.status(400).json({ mensagem: 'Recurso invalido.' });
+  if (!Number.isInteger(recursoId) || recursoId < 1 || !isValidDateTime(inicio)) {
+    return res.status(400).json({ mensagem: 'Recurso ou data invalida.' });
   }
   try {
     const resource = await get('SELECT tipo FROM recursos WHERE id = ?', [recursoId]);
@@ -309,7 +309,6 @@ const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS
   FROM reservas r JOIN usuarios u ON u.id = r.usuario_id
   JOIN recursos x ON x.id = r.recurso_id`;
 
-// Todos os usuários autenticados podem consultar a agenda completa.
 app.get('/api/reservas', requireAuth, async (req, res) => {
   try {
     const conditions = [];
@@ -330,7 +329,14 @@ app.get('/api/reservas', requireAuth, async (req, res) => {
       params.push(new Date().toISOString().split('T')[0]);
     }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
-    res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
+    const rows = await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params);
+    // Do not let one malformed legacy timestamp break rendering/filtering of every reservation.
+    const validRows = rows.filter((reservation) => {
+      const valid = isValidDateTime(reservation.inicio) && isValidDateTime(reservation.fim);
+      if (!valid) console.warn('Reserva ignorada na resposta da agenda por data inválida:', reservation.id);
+      return valid;
+    });
+    res.json(validRows);
   } catch (error) { handleError(res, error); }
 });
 
@@ -341,8 +347,8 @@ app.post('/api/reservas', requireAuth, async (req, res) => {
   const motorista = String(req.body.motorista || '').trim();
   const destino = String(req.body.destino || '').trim();
   const motivo = String(req.body.motivo || '').trim();
-  if (!recursoId || !inicio || !fim || new Date(inicio) >= new Date(fim)) {
-    return res.status(400).json({ mensagem: 'Informe o recurso e um periodo valido, com fim depois do inicio.' });
+  if (!recursoId || !isValidDateTime(inicio) || !isValidDateTime(fim) || new Date(inicio) >= new Date(fim)) {
+    return res.status(400).json({ mensagem: 'Informe o recurso e datas validas, com fim depois do inicio.' });
   }
   try {
     const resource = await get('SELECT tipo FROM recursos WHERE id = ?', [recursoId]);
@@ -374,8 +380,8 @@ app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, 
   const motivo = String(req.body.motivo || '').trim();
   const kmFinal = parseOptionalNumber(req.body.km_final);
   const combustivelFinal = parseOptionalNumber(req.body.combustivel_final);
-  if (!recursoId || !inicio || !fim || new Date(inicio) >= new Date(fim)) {
-    return res.status(400).json({ mensagem: 'Informe o recurso e um periodo valido, com fim depois do inicio.' });
+  if (!recursoId || !isValidDateTime(inicio) || !isValidDateTime(fim) || new Date(inicio) >= new Date(fim)) {
+    return res.status(400).json({ mensagem: 'Informe o recurso e datas validas, com fim depois do inicio.' });
   }
   if (Number.isNaN(kmFinal) || (kmFinal !== null && kmFinal < 0) || !validFuelLevel(combustivelFinal) ||
       ((kmFinal === null) !== (combustivelFinal === null))) {
