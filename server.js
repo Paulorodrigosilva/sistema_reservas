@@ -302,6 +302,18 @@ app.delete('/api/recursos/:id', requireAuth, requireMaster, async (req, res) => 
   } catch (error) { handleError(res, error); }
 });
 
+// Rota de odômetro adicionada para evitar erro 404/500
+app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
+  try {
+    const resourceId = Number(req.params.id);
+    const startsAt = req.query.inicio || new Date().toISOString();
+    const previousOdometer = await getPreviousOdometer(resourceId, startsAt);
+    res.json({ km_inicio_sugerido: previousOdometer?.km_final ?? null });
+  } catch (error) {
+    res.json({ km_inicio_sugerido: null });
+  }
+});
+
 const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS recurso_id,
   x.nome AS recurso, x.tipo AS tipo_recurso, x.numero, r.motorista, r.destino, r.motivo,
   r.km_inicio, r.km_final, r.combustivel_inicio, r.combustivel_final,
@@ -312,134 +324,4 @@ const reservationSelect = `SELECT r.id, r.usuario_id, u.nome AS usuario, x.id AS
 // TODOS OS USUÁRIOS LOGADOS PODEM VER TODAS AS RESERVAS
 app.get('/api/reservas', requireAuth, async (req, res) => {
   try {
-    let conditions = [];
-    let params = [];
-
-    const dataInicio = String(req.query.data_inicio || '').trim();
-    const dataFim = String(req.query.data_fim || '').trim();
-
-    if (dataInicio && dataFim) {
-      conditions.push('date(r.data_inicio) <= ? AND date(r.data_fim) >= ?');
-      params.push(dataFim, dataInicio);
-    } else if (dataInicio) {
-      conditions.push('date(r.data_fim) >= ?');
-      params.push(dataInicio);
-    } else if (dataFim) {
-      conditions.push('date(r.data_inicio) <= ?');
-      params.push(dataFim);
-    } else {
-      const hoje = new Date().toISOString().split('T')[0];
-      conditions.push('date(r.data_fim) >= ?');
-      params.push(hoje);
-    }
-
-    const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';
-    res.json(await all(`${reservationSelect}${where} ORDER BY r.data_inicio`, params));
-  } catch (error) { handleError(res, error); }
-});
-
-// QUALQUER USUÁRIO LOGADO PODE FAZER UMA NOVA RESERVA
-app.post('/api/reservas', requireAuth, async (req, res) => {
-  const recursoId = Number(req.body.recurso_id);
-  const inicio = String(req.body.inicio || '').trim();
-  const fim = String(req.body.fim || '').trim();
-  const motorista = String(req.body.motorista || '').trim();
-  const destino = String(req.body.destino || '').trim();
-  const motivo = String(req.body.motivo || '').trim();
-  if (!recursoId || !inicio || !fim || new Date(inicio) >= new Date(fim)) {
-    return res.status(400).json({ mensagem: 'Informe o recurso e um periodo valido, com fim depois do inicio.' });
-  }
-  try {
-    const resource = await get('SELECT tipo FROM recursos WHERE id = ?', [recursoId]);
-    if (!resource) return res.status(404).json({ mensagem: 'Recurso nao encontrado.' });
-    if (resource.tipo !== 'sala' && (!motorista || !destino)) {
-      return res.status(400).json({ mensagem: 'Para reservar veiculo, informe motorista e destino.' });
-    }
-    const conflict = await get(`SELECT id FROM reservas WHERE recurso_id = ?
-      AND data_fim > ? AND data_inicio < ? LIMIT 1`, [recursoId, inicio, fim]);
-    if (conflict) return res.status(409).json({ mensagem: 'Este recurso ja esta reservado nesse periodo.' });
-    const previousOdometer = resource.tipo === 'sala' ? null : await getPreviousOdometer(recursoId, inicio);
-    const kmInicio = previousOdometer?.km_final ?? null;
-    const result = await run(`INSERT INTO reservas
-      (usuario_id, recurso_id, motorista, destino, motivo, km_inicio, km_final,
-       combustivel_final, data_inicio, data_fim)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
-      req.session.user.id, recursoId, motorista, destino, motivo, kmInicio, null,
-      null, inicio, fim
-    ]);
-    res.status(201).json({ id: result.id, mensagem: 'Reserva realizada.' });
-  } catch (error) { handleError(res, error); }
-});
-
-// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EDITAR RESERVAS
-app.put('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
-  const recursoId = Number(req.body.recurso_id);
-  const inicio = String(req.body.inicio || '').trim();
-  const fim = String(req.body.fim || '').trim();
-  const motorista = String(req.body.motorista || '').trim();
-  const destino = String(req.body.destino || '').trim();
-  const motivo = String(req.body.motivo || '').trim();
-  const kmFinal = parseOptionalNumber(req.body.km_final);
-  const combustivelFinal = parseOptionalNumber(req.body.combustivel_final);
-  if (!recursoId || !inicio || !fim || new Date(inicio) >= new Date(fim)) {
-    return res.status(400).json({ mensagem: 'Informe o recurso e um periodo valido, com fim depois do inicio.' });
-  }
-  if (Number.isNaN(kmFinal) || (kmFinal !== null && kmFinal < 0) || !validFuelLevel(combustivelFinal) ||
-      ((kmFinal === null) !== (combustivelFinal === null))) {
-    return res.status(400).json({ mensagem: 'Confira os valores de quilometragem e combustivel.' });
-  }
-  try {
-    const [current, resource] = await Promise.all([
-      get('SELECT id, recurso_id FROM reservas WHERE id = ?', [req.params.id]),
-      get('SELECT tipo FROM recursos WHERE id = ?', [recursoId])
-    ]);
-    if (!current) return res.status(404).json({ mensagem: 'Reserva nao encontrada.' });
-    if (!resource) return res.status(404).json({ mensagem: 'Recurso nao encontrado.' });
-    if (resource.tipo !== 'sala' && (!motorista || !destino)) {
-      return res.status(400).json({ mensagem: 'Para veiculos, informe motorista e destino.' });
-    }
-    const conflict = await get(`SELECT id FROM reservas WHERE recurso_id = ? AND id != ?
-      AND data_fim > ? AND data_inicio < ? LIMIT 1`, [recursoId, req.params.id, inicio, fim]);
-    if (conflict) return res.status(409).json({ mensagem: 'Este recurso ja esta reservado nesse periodo.' });
-    const previousOdometer = resource.tipo === 'sala' ? null : await getPreviousOdometer(recursoId, inicio, req.params.id);
-    const kmInicio = previousOdometer?.km_final ?? null;
-    if (kmInicio !== null && kmFinal !== null && kmFinal < kmInicio) {
-      return res.status(400).json({ mensagem: 'O KM de entrega nao pode ser menor que o KM inicial.' });
-    }
-    await run(`UPDATE reservas SET recurso_id = ?, motorista = ?, destino = ?, motivo = ?,
-      km_inicio = ?, km_final = ?, combustivel_inicio = NULL, combustivel_final = ?,
-      data_inicio = ?, data_fim = ? WHERE id = ?`, [
-      recursoId, motorista, destino, motivo, kmInicio, kmFinal,
-      combustivelFinal, inicio, fim, req.params.id
-    ]);
-    if (current.recurso_id !== recursoId) await updateFollowingOdometers(current.recurso_id);
-    if (resource.tipo !== 'sala') await updateFollowingOdometers(recursoId);
-    res.json({ mensagem: 'Reserva atualizada.' });
-  } catch (error) { handleError(res, error); }
-});
-
-// APENAS O MASTER (OU QUEM TEM PERMISSÃO) PODE EXCLUIR RESERVAS
-app.delete('/api/reservas/:id', requireAuth, requireReservationEditor, async (req, res) => {
-  try {
-    const result = req.session.user.tipo === 'master'
-      ? await run('DELETE FROM reservas WHERE id = ?', [req.params.id])
-      : await run('DELETE FROM reservas WHERE id = ? AND usuario_id = ?', [req.params.id, req.session.user.id]);
-    if (!result.changes) return res.status(404).json({ mensagem: 'Reserva nao encontrada.' });
-    res.json({ mensagem: 'Reserva cancelada.' });
-  } catch (error) { handleError(res, error); }
-});
-
-app.use('/api', (req, res) => res.status(404).json({ mensagem: 'Rota da API nao encontrada.' }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-
-if (require.main === module) {
-  ensureDatabaseReady().then(() => {
-    app.listen(port, '0.0.0.0', () => console.log(`Sistema de reservas disponivel em http://0.0.0.0:${port}`));
-  }).catch((error) => {
-    console.error('Falha ao inicializar o banco de dados:', error);
-    process.exit(1);
-  });
-}
-
-module.exports = app;
+    let conditions =
