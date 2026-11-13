@@ -41,14 +41,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Inicialização segura do banco sem bloquear rotas estáticas
+// Middleware de segurança para o banco
 app.use(async (req, res, next) => {
   try {
     await ensureDatabaseReady();
     next();
   } catch (error) {
-    console.error('Erro crítico ao preparar banco:', error);
-    res.status(500).json({ mensagem: 'Banco de dados temporariamente indisponível.' });
+    console.error('Erro ao conectar no banco:', error);
+    res.status(500).json({ mensagem: 'Erro de conexão com o banco de dados.' });
   }
 });
 
@@ -61,7 +61,7 @@ app.get('/api/health', async (req, res) => {
       origem_banco: getDatabaseTarget()
     });
   } catch (error) {
-    res.status(500).json({ ok: false, mensagem: 'Falha no healthcheck do banco.' });
+    res.status(500).json({ ok: false, mensagem: 'Falha no healthcheck.' });
   }
 });
 
@@ -95,25 +95,33 @@ function validFuelLevel(value) {
 }
 
 async function getPreviousOdometer(resourceId, startsAt, excludeId) {
-  const excludedReservation = excludeId ? ' AND id != ?' : '';
-  const params = [resourceId, startsAt];
-  if (excludeId) params.push(excludeId);
-  return get(`SELECT km_final FROM reservas WHERE recurso_id = ? AND km_final IS NOT NULL
-    AND datetime(data_fim) <= datetime(?)${excludedReservation}
-    ORDER BY datetime(data_fim) DESC, id DESC LIMIT 1`, params);
+  try {
+    const excludedReservation = excludeId ? ' AND id != ?' : '';
+    const params = [resourceId, startsAt];
+    if (excludeId) params.push(excludeId);
+    return await get(`SELECT km_final FROM reservas WHERE recurso_id = ? AND km_final IS NOT NULL
+      AND datetime(data_fim) <= datetime(?)${excludedReservation}
+      ORDER BY datetime(data_fim) DESC, id DESC LIMIT 1`, params);
+  } catch (e) {
+    return null;
+  }
 }
 
 async function updateFollowingOdometers(resourceId) {
-  const rows = await all(`SELECT id, km_inicio, km_final FROM reservas WHERE recurso_id = ?
-    ORDER BY datetime(data_inicio), id`, [resourceId]);
-  let latestKm = null;
-  for (const row of rows) {
-    if (latestKm !== null) {
-      await run('UPDATE reservas SET km_inicio = ? WHERE id = ?', [latestKm, row.id]);
-    } else if (row.km_inicio !== null && row.km_inicio !== undefined) {
-      latestKm = Number(row.km_inicio);
+  try {
+    const rows = await all(`SELECT id, km_inicio, km_final FROM reservas WHERE recurso_id = ?
+      ORDER BY datetime(data_inicio), id`, [resourceId]);
+    let latestKm = null;
+    for (const row of rows) {
+      if (latestKm !== null) {
+        await run('UPDATE reservas SET km_inicio = ? WHERE id = ?', [latestKm, row.id]);
+      } else if (row.km_inicio !== null && row.km_inicio !== undefined) {
+        latestKm = Number(row.km_inicio);
+      }
+      if (row.km_final !== null && row.km_final !== undefined) latestKm = Number(row.km_final);
     }
-    if (row.km_final !== null && row.km_final !== undefined) latestKm = Number(row.km_final);
+  } catch (e) {
+    console.error('Erro ao atualizar odômetros:', e);
   }
 }
 
@@ -135,7 +143,7 @@ app.post('/api/cadastro', async (req, res) => {
     ]);
     res.status(201).json({ id: result.id, mensagem: 'Cadastro criado. Agora voce ja pode entrar.' });
   } catch (error) {
-    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
+    if (isConstraintError && isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
     handleError(res, error);
   }
 });
@@ -204,7 +212,7 @@ app.post('/api/usuarios', requireAuth, requireMaster, async (req, res) => {
     ]);
     res.status(201).json({ id: result.id, mensagem: 'Usuario adicionado.' });
   } catch (error) {
-    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
+    if (isConstraintError && isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail ja esta cadastrado.' });
     handleError(res, error);
   }
 });
@@ -233,7 +241,7 @@ app.put('/api/usuarios/:id', requireAuth, requireMaster, async (req, res) => {
     }
     res.json({ mensagem: 'Usuário atualizado com sucesso.' });
   } catch (error) {
-    if (isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail já está cadastrado.' });
+    if (isConstraintError && isConstraintError(error)) return res.status(409).json({ mensagem: 'Este e-mail já está cadastrado.' });
     handleError(res, error);
   }
 });
@@ -306,7 +314,6 @@ app.delete('/api/recursos/:id', requireAuth, requireMaster, async (req, res) => 
   } catch (error) { handleError(res, error); }
 });
 
-// Rota de odômetro segura
 app.get('/api/recursos/:id/odometro', requireAuth, async (req, res) => {
   try {
     const resourceId = Number(req.params.id);
