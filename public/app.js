@@ -156,10 +156,25 @@ function updateVehicleFields() {
   document.querySelector('#vehicle-fields').hidden = !isVehicle;
   reservationForm.elements.motorista.required = Boolean(isVehicle);
   reservationForm.elements.destino.required = Boolean(isVehicle);
-  
-  // Define o placeholder padrão para digitação manual caso não use a rota de odômetro
-  if (isVehicle && !reservationForm.elements.km_inicio.value) {
-    reservationForm.elements.km_inicio.placeholder = 'Informe o KM de saída';
+}
+
+async function fillSuggestedOdometer() {
+  const resource = resources.find((item) => String(item.id) === resourceSelect.value);
+  if (!resource || resource.tipo === 'sala' || editingReservationId) return;
+  const resourceId = String(resource.id);
+  const odometerField = reservationForm.elements.km_inicio;
+  odometerField.value = '';
+  odometerField.placeholder = 'Buscando último KM...';
+  try {
+    const startsAt = reservationForm.elements.inicio.value || new Date().toISOString();
+    const result = await api(`/api/recursos/${resourceId}/odometro?inicio=${encodeURIComponent(startsAt)}`);
+    if (resourceSelect.value !== resourceId || editingReservationId) return;
+    odometerField.value = result.km_inicio_sugerido ?? '';
+    odometerField.placeholder = result.km_inicio_sugerido === null
+      ? 'Primeiro uso: informe o KM' : 'Último KM registrado';
+  } catch (error) {
+    odometerField.placeholder = 'Informe o KM de saída';
+    showToast(error.message);
   }
 }
 
@@ -343,8 +358,11 @@ authForm.addEventListener('submit', async (event) => {
   }
 });
 
-// Atualiza apenas a exibição dos campos de veículo ao trocar de recurso
-resourceSelect.addEventListener('change', updateVehicleFields);
+resourceSelect.addEventListener('change', () => {
+  updateVehicleFields();
+  fillSuggestedOdometer();
+});
+reservationForm.elements.inicio.addEventListener('change', fillSuggestedOdometer);
 document.querySelector('#reservation-filter').addEventListener('change', renderReservations);
 
 if (dateStartFilter) dateStartFilter.addEventListener('change', loadDashboard);
@@ -494,4 +512,4 @@ document.querySelector('#logout-button').addEventListener('click', async () => {
   } catch (error) {
     setMessage(authMessage, error.message);
   }
-})();
+})()
